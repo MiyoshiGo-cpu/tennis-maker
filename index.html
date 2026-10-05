@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title></title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="page-header">
+    <h1 data-text="title"></h1>
+  </header>
+  <main class="workspace">
+    <aside class="preview">
+      <article id="player-card" class="player-card" aria-labelledby="card-name"></article>
+      <button type="button" class="button primary desktop-save" data-save data-text="saveImage"></button>
+    </aside>
+    <form id="player-form" novalidate></form>
+  </main>
+  <nav class="mobile-actions">
+    <button type="button" class="button secondary" id="view-card" data-text="viewCard"></button>
+    <button type="button" class="button primary" data-save data-text="saveImage"></button>
+  </nav>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <dialog id="image-dialog" aria-labelledby="image-title">
+    <div class="dialog-heading">
+      <h2 id="image-title" data-text="saveImage"></h2>
+      <button type="button" class="button secondary" id="close-dialog" data-text="close"></button>
+    </div>
+    <p data-text="saveHint"></p>
+    <img id="export-image" class="export-image" alt="">
+    <a id="download-image" class="button primary" data-text="download"></a>
+  </dialog>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
