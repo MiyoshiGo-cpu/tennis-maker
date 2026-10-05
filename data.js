@@ -1,8 +1,17 @@
 "use strict";
 
 const DATA = {
-  version: 1,
-  storageKey: "tennisMaker.v1.player",
+  version: 2,
+  storageKey: "tennisMaker.v2.world",
+  legacyStorageKey: "tennisMaker.v1.player",
+  playerFields: ["name", "hand", "backhand"],
+  series: {
+    startId: "2017-1",
+    periods: { "1": "前半", "2": "後半" },
+    label: "{year} {period}", fileLabel: "{year}{period}"
+  },
+  worldUi: { listMode: "series", sort: "score", lastExportedAt: null },
+  playerId: { prefix: "p_", radix: 36, randomLength: 4 },
   text: {
     title: "テニス能力メーカー",
     basic: "基本情報", stats: "能力値", styleAndServe: "プレイスタイルとサーブ",

@@ -1,27 +1,45 @@
 "use strict";
 
-function createDefaultPlayer() {
-  const player = { version: DATA.version, ...DATA.initial, stats: {}, shotSkills: {}, rankSkills: {} };
-  DATA.textFields.forEach(field => { player[field.id] = field.initial; });
-  [...DATA.stats.front, ...DATA.stats.back].forEach(item => { player.stats[item.id] = DATA.stats.initial; });
-  DATA.shotSkills.items.forEach(item => { player.shotSkills[item.id] = DATA.shotSkills.initial; });
-  DATA.rankSkills.items.forEach(item => { player.rankSkills[item.id] = DATA.rankSkills.initial; });
-  DATA.toggleGroups.forEach(group => { player[group] = []; });
-  return player;
+function normalizeFixedFields(raw) {
+  const fields = {};
+  DATA.playerFields.forEach(key => {
+    const text = DATA.textFields.find(field => field.id === key);
+    if (text) fields[key] = typeof raw?.[key] === "string" ? Array.from(raw[key]).slice(0, text.max).join("") : text.initial;
+    else fields[key] = DATA.basic[key].some(item => item.id === raw?.[key]) ? raw[key] : DATA.initial[key];
+  });
+  return fields;
+}
+
+function createDefaultCard() {
+  const card = { stats: {}, shotSkills: {}, rankSkills: {} };
+  Object.entries(DATA.initial).forEach(([key, value]) => {
+    if (!DATA.playerFields.includes(key)) card[key] = value;
+  });
+  DATA.textFields.filter(field => !DATA.playerFields.includes(field.id)).forEach(field => { card[field.id] = field.initial; });
+  [...DATA.stats.front, ...DATA.stats.back].forEach(item => { card.stats[item.id] = DATA.stats.initial; });
+  DATA.shotSkills.items.forEach(item => { card.shotSkills[item.id] = DATA.shotSkills.initial; });
+  DATA.rankSkills.items.forEach(item => { card.rankSkills[item.id] = DATA.rankSkills.initial; });
+  DATA.toggleGroups.forEach(group => { card[group] = []; });
+  return card;
+}
+
+function createDefaultEditorPlayer() {
+  return { ...normalizeFixedFields(null), ...createDefaultCard() };
 }
 
 function clampStat(value) {
   return Math.max(DATA.stats.min, Math.min(DATA.stats.max, Math.round(value)));
 }
 
-function normalizePlayer(raw) {
-  const player = createDefaultPlayer();
+function normalizeCard(raw) {
+  const player = createDefaultCard();
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return player;
-  DATA.textFields.forEach(field => {
+  DATA.textFields.filter(field => !DATA.playerFields.includes(field.id)).forEach(field => {
     if (typeof raw[field.id] === "string") player[field.id] = Array.from(raw[field.id]).slice(0, field.max).join("");
   });
   const choices = { ...DATA.basic, playStyle: DATA.playStyles, serve: DATA.serves };
   Object.entries(choices).forEach(([key, items]) => {
+    if (DATA.playerFields.includes(key)) return;
     if (items.some(item => item.id === raw[key])) player[key] = raw[key];
   });
   [...DATA.stats.front, ...DATA.stats.back].forEach(item => {
@@ -52,35 +70,137 @@ function normalizePlayer(raw) {
   return player;
 }
 
-// 保存先に依存する処理はこの2関数のみ。描画・入力は PLAYER_STORAGE を通す。
-// 将来の複数選手・シリーズ対応では、このアダプターを差し替える。
-function loadPlayer() {
+function normalizeLegacyPlayer(raw) {
+  return { ...normalizeFixedFields(raw), ...normalizeCard(raw) };
+}
+
+function seriesOrder(id) {
+  if (typeof id !== "string" || !/^\d{4,}-[12]$/.test(id)) return null;
+  const [year, period] = id.split("-");
+  if (year[0] === "0") return null;
+  return BigInt(year) * 2n + BigInt(period);
+}
+
+function isValidSeriesId(id) {
+  const order = seriesOrder(id);
+  return order !== null && order >= seriesOrder(DATA.series.startId);
+}
+
+function compareSeries(a, b) {
+  const first = seriesOrder(a), second = seriesOrder(b);
+  return first < second ? -1 : first > second ? 1 : 0;
+}
+
+function seriesName(id, forFile = false) {
+  const [year, period] = id.split("-");
+  const values = { year, period: DATA.series.periods[period] };
+  return (forFile ? DATA.series.fileLabel : DATA.series.label).replace(/\{(\w+)\}/g, (_, key) => values[key]);
+}
+
+function generatePlayerId(usedIds) {
+  let id;
+  do {
+    const random = Math.floor(Math.random() * DATA.playerId.radix ** DATA.playerId.randomLength)
+      .toString(DATA.playerId.radix).padStart(DATA.playerId.randomLength, "0");
+    id = DATA.playerId.prefix + Date.now().toString(DATA.playerId.radix) + random;
+  } while (usedIds.has(id));
+  return id;
+}
+
+function normalizePlayer(raw, usedIds = new Set()) {
+  const validId = typeof raw.id === "string" && /^p_[a-z0-9]{5,}$/.test(raw.id) && !usedIds.has(raw.id);
+  const id = validId ? raw.id : generatePlayerId(usedIds);
+  usedIds.add(id);
+  const timestamp = typeof raw.createdAt === "string" ? Date.parse(raw.createdAt) : NaN;
+  const player = {
+    id, ...normalizeFixedFields(raw),
+    createdAt: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : new Date().toISOString(),
+    cards: {}
+  };
+  if (raw.cards && typeof raw.cards === "object" && !Array.isArray(raw.cards)) {
+    Object.entries(raw.cards).forEach(([seriesId, card]) => {
+      if (isValidSeriesId(seriesId)) player.cards[seriesId] = normalizeCard(card);
+    });
+  }
+  return player;
+}
+
+function createEmptyWorld() {
+  return {
+    version: DATA.version, latestSeriesId: DATA.series.startId, players: [],
+    ui: { seriesId: DATA.series.startId, ...DATA.worldUi }
+  };
+}
+
+function normalizeWorld(raw) {
+  const world = createEmptyWorld();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return world;
+  if (isValidSeriesId(raw.latestSeriesId)) world.latestSeriesId = raw.latestSeriesId;
+  const usedIds = new Set();
+  if (Array.isArray(raw.players)) {
+    world.players = raw.players.filter(player => player && typeof player === "object" && !Array.isArray(player))
+      .map(player => normalizePlayer(player, usedIds));
+  }
+  world.players.forEach(player => {
+    Object.keys(player.cards).forEach(id => {
+      if (compareSeries(id, world.latestSeriesId) > 0) world.latestSeriesId = id;
+    });
+  });
+  if (raw.ui && typeof raw.ui === "object" && !Array.isArray(raw.ui)) {
+    if (isValidSeriesId(raw.ui.seriesId) && compareSeries(raw.ui.seriesId, world.latestSeriesId) <= 0) world.ui.seriesId = raw.ui.seriesId;
+    ["listMode", "sort"].forEach(key => {
+      if (typeof raw.ui[key] === "string" && raw.ui[key]) world.ui[key] = raw.ui[key];
+    });
+    if (typeof raw.ui.lastExportedAt === "string" && Number.isFinite(Date.parse(raw.ui.lastExportedAt))) {
+      world.ui.lastExportedAt = new Date(raw.ui.lastExportedAt).toISOString();
+    }
+  }
+  return world;
+}
+
+function createWorldPlayer(editorPlayer, usedIds = new Set()) {
+  return normalizePlayer({ ...normalizeFixedFields(editorPlayer), cards: { [DATA.series.startId]: normalizeCard(editorPlayer) } }, usedIds);
+}
+
+// 永続化はワールド単位。このアダプターだけがlocalStorageに触れる。
+function loadWorld() {
   try {
     const serialized = localStorage.getItem(DATA.storageKey);
-    return normalizePlayer(serialized ? JSON.parse(serialized) : null);
+    if (serialized !== null) return normalizeWorld(JSON.parse(serialized));
+    const legacy = localStorage.getItem(DATA.legacyStorageKey);
+    if (legacy !== null) {
+      const player = normalizeLegacyPlayer(JSON.parse(legacy));
+      if (JSON.stringify(player) !== JSON.stringify(createDefaultEditorPlayer())) {
+        const world = createEmptyWorld();
+        world.players.push(createWorldPlayer(player));
+        saveWorld(world);
+        return world;
+      }
+    }
+    return createEmptyWorld();
   } catch (_) {
-    return createDefaultPlayer();
+    return createEmptyWorld();
   }
 }
 
-function savePlayer(player) {
+function saveWorld(world) {
   try {
-    localStorage.setItem(DATA.storageKey, JSON.stringify(normalizePlayer(player)));
+    localStorage.setItem(DATA.storageKey, JSON.stringify(normalizeWorld(world)));
     return true;
   } catch (_) {
     return false;
   }
 }
 
-const PLAYER_STORAGE = { load: loadPlayer, save: savePlayer };
+const WORLD_STORAGE = { load: loadWorld, save: saveWorld };
 
-function calculateScore(player) {
-  const average = items => items.reduce((sum, item) => sum + player.stats[item.id], 0) / items.length;
+function calculateScore(card) {
+  const average = items => items.reduce((sum, item) => sum + card.stats[item.id], 0) / items.length;
   const base = average(DATA.stats.front) * DATA.score.frontWeight + average(DATA.stats.back) * DATA.score.backWeight;
-  let bonus = DATA.toggleGroups.reduce((sum, group) => sum + player[group].length * DATA[group].bonus, 0);
+  let bonus = DATA.toggleGroups.reduce((sum, group) => sum + card[group].length * DATA[group].bonus, 0);
   ["shotSkills", "rankSkills"].forEach(group => {
     DATA[group].items.forEach(item => {
-      bonus += DATA[group].levels.find(level => (level.id || level.rank) === player[group][item.id]).bonus;
+      bonus += DATA[group].levels.find(level => (level.id || level.rank) === card[group][item.id]).bonus;
     });
   });
   const value = Math.max(DATA.score.min, Math.round((base + bonus) * DATA.score.scale));
@@ -88,7 +208,22 @@ function calculateScore(player) {
 }
 
 (function () {
-  let player = PLAYER_STORAGE.load();
+  const world = WORLD_STORAGE.load();
+  let created = false;
+  // ステップ1の単画面用の仮処理。ステップ2では選手0人の一覧を表示する。
+  if (!world.players.length) {
+    world.players.push(createWorldPlayer(createDefaultEditorPlayer()));
+    created = true;
+  }
+  const editingPlayer = world.players[0];
+  if (!Object.keys(editingPlayer.cards).length) {
+    editingPlayer.cards[DATA.series.startId] = createDefaultCard();
+    created = true;
+  }
+  const editingSeriesId = Object.keys(editingPlayer.cards).sort(compareSeries)[0];
+  // 既存フォームは固定項目とカード項目を結合した編集用データを扱う。
+  let player = { ...normalizeFixedFields(editingPlayer), ...editingPlayer.cards[editingSeriesId] };
+  if (created) WORLD_STORAGE.save(world);
   let toastTimer;
   let exporting = false;
   let imageUrl;
@@ -260,7 +395,7 @@ function calculateScore(player) {
     reset.type = "button";
     reset.addEventListener("click", () => {
       if (!window.confirm(DATA.text.resetConfirm)) return;
-      player = createDefaultPlayer();
+      player = createDefaultEditorPlayer();
       commit();
       toast(DATA.text.resetDone);
     });
@@ -315,6 +450,7 @@ function calculateScore(player) {
       courtLines.append(line);
     });
     const identity = element("div", "card-identity");
+    identity.append(element("span", "series-badge", seriesName(editingSeriesId)));
     if (player.nickname) identity.append(element("p", "nickname", player.nickname));
     const name = element("h2", "card-name", player.name || DATA.text.anonymous);
     name.id = "card-name";
@@ -324,7 +460,7 @@ function calculateScore(player) {
       return item.cardName || item.name;
     });
     identity.append(element("p", "card-meta", meta.join(DATA.text.separator)));
-    const score = calculateScore(player);
+    const score = calculateScore(editingPlayer.cards[editingSeriesId]);
     const overall = element("div", "overall");
     overall.append(element("span", "overall-label", DATA.text.overall), element("strong", "score-number", score.value.toLocaleString("ja-JP")), element("span", "overall-rank", score.rank));
     header.append(courtLines, identity, overall);
@@ -398,9 +534,11 @@ function calculateScore(player) {
   }
 
   function commit() {
+    DATA.playerFields.forEach(key => { editingPlayer[key] = player[key]; });
+    editingPlayer.cards[editingSeriesId] = normalizeCard(player);
     syncForm();
     renderCard();
-    PLAYER_STORAGE.save(player);
+    WORLD_STORAGE.save(world);
   }
 
   function toast(text) {
@@ -456,9 +594,9 @@ function calculateScore(player) {
     window.scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   });
 
-  function fileName(name) {
+  function fileName(name, seriesId) {
     const safeName = name.trim().replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, "_").replace(/[. ]+$/g, "_");
-    return safeName ? "tennis-card_" + safeName + ".png" : "tennis-card.png";
+    return "tennis-card" + (safeName ? "_" + safeName : "") + "_" + seriesName(seriesId, true) + ".png";
   }
 
   function showImage(blob, filename) {
@@ -505,7 +643,7 @@ function calculateScore(player) {
     holder.style.width = card.getBoundingClientRect().width + "px";
     holder.append(snapshot);
     document.body.append(holder);
-    const filename = fileName(player.name);
+    const filename = fileName(player.name, editingSeriesId);
     try {
       await document.fonts.ready;
       await Promise.all(Array.from(snapshot.querySelectorAll("img")).map(image => image.decode()));
