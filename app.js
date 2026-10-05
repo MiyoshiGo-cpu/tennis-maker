@@ -91,6 +91,35 @@ function compareSeries(a, b) {
   return first < second ? -1 : first > second ? 1 : 0;
 }
 
+function shiftSeries(id, offset) {
+  const order = seriesOrder(id) + BigInt(offset) - 1n;
+  return (order / 2n).toString() + "-" + (order % 2n + 1n).toString();
+}
+
+function* seriesIds(latest, reverse = false) {
+  const first = seriesOrder(DATA.series.startId), last = seriesOrder(latest);
+  for (let order = reverse ? last : first; reverse ? order >= first : order <= last; order += reverse ? -1n : 1n) {
+    yield ((order - 1n) / 2n).toString() + "-" + ((order - 1n) % 2n + 1n).toString();
+  }
+}
+
+function addWorldSeries(world) {
+  world.latestSeriesId = shiftSeries(world.latestSeriesId, 1);
+  world.ui.seriesId = world.latestSeriesId;
+}
+
+function canDeleteLatestSeries(world) {
+  return world.latestSeriesId !== DATA.series.startId && !world.players.some(player => Object.hasOwn(player.cards, world.latestSeriesId));
+}
+
+function deleteLatestSeries(world) {
+  if (!canDeleteLatestSeries(world)) return false;
+  const deleted = world.latestSeriesId;
+  world.latestSeriesId = shiftSeries(deleted, -1);
+  if (world.ui.seriesId === deleted) world.ui.seriesId = world.latestSeriesId;
+  return true;
+}
+
 function seriesName(id, forFile = false) {
   const [year, period] = id.split("-");
   const values = { year, period: DATA.series.periods[period] };
@@ -148,9 +177,8 @@ function normalizeWorld(raw) {
   });
   if (raw.ui && typeof raw.ui === "object" && !Array.isArray(raw.ui)) {
     if (isValidSeriesId(raw.ui.seriesId) && compareSeries(raw.ui.seriesId, world.latestSeriesId) <= 0) world.ui.seriesId = raw.ui.seriesId;
-    ["listMode", "sort"].forEach(key => {
-      if (typeof raw.ui[key] === "string" && raw.ui[key]) world.ui[key] = raw.ui[key];
-    });
+    if (DATA.listModes.some(item => item.id === raw.ui.listMode)) world.ui.listMode = raw.ui.listMode;
+    if (DATA.listSorts.some(item => item.id === raw.ui.sort)) world.ui.sort = raw.ui.sort;
     if (typeof raw.ui.lastExportedAt === "string" && Number.isFinite(Date.parse(raw.ui.lastExportedAt))) {
       world.ui.lastExportedAt = new Date(raw.ui.lastExportedAt).toISOString();
     }
@@ -176,11 +204,42 @@ function deleteWorldPlayer(world, playerId) {
   world.players = world.players.filter(player => player.id !== playerId);
 }
 
+function nearestCardSeries(player, seriesId, allowFollowing = true) {
+  const ids = Object.keys(player.cards).sort(compareSeries);
+  return ids.filter(id => compareSeries(id, seriesId) < 0).pop()
+    || (allowFollowing ? ids.find(id => compareSeries(id, seriesId) > 0) : undefined);
+}
+
+function createWorldCard(player, seriesId) {
+  if (!isValidSeriesId(seriesId) || Object.hasOwn(player.cards, seriesId)) return false;
+  const source = nearestCardSeries(player, seriesId);
+  player.cards[seriesId] = source ? normalizeCard(player.cards[source]) : createDefaultCard();
+  return true;
+}
+
+function copyPreviousCard(player, seriesId) {
+  const source = nearestCardSeries(player, seriesId, false);
+  if (!source || !Object.hasOwn(player.cards, seriesId)) return false;
+  player.cards[seriesId] = normalizeCard(player.cards[source]);
+  return true;
+}
+
+function deleteWorldCard(player, seriesId) {
+  if (Object.keys(player.cards).length < 2 || !Object.hasOwn(player.cards, seriesId)) return false;
+  delete player.cards[seriesId];
+  return true;
+}
+
+function scoreHistory(player) {
+  return Object.keys(player.cards).sort(compareSeries).map(seriesId => ({ seriesId, ...calculateScore(player.cards[seriesId]) }));
+}
+
 function listSeriesPlayers(world) {
-  return world.players.filter(player => Object.hasOwn(player.cards, world.ui.seriesId)).sort((a, b) => {
+  return world.players.filter(player => world.ui.listMode === "all" || Object.hasOwn(player.cards, world.ui.seriesId)).sort((a, b) => {
     if (world.ui.sort === "name") return (a.name || DATA.text.anonymous).localeCompare(b.name || DATA.text.anonymous, "ja");
     if (world.ui.sort === "created") return Date.parse(a.createdAt) - Date.parse(b.createdAt);
-    return calculateScore(b.cards[world.ui.seriesId]).value - calculateScore(a.cards[world.ui.seriesId]).value;
+    const score = player => player.cards[world.ui.seriesId] ? calculateScore(player.cards[world.ui.seriesId]).value : -Infinity;
+    return score(b) - score(a) || 0;
   });
 }
 
@@ -189,6 +248,11 @@ function resolveEditRoute(world, hash) {
   if (!match) return null;
   const player = world.players.find(item => item.id === match[1]);
   return player && Object.hasOwn(player.cards, match[2]) ? { player, seriesId: match[2] } : null;
+}
+
+function resolvePlayerRoute(world, hash) {
+  const match = /^#\/player\/(p_[a-z0-9]+)$/.exec(hash);
+  return match ? world.players.find(player => player.id === match[1]) || null : null;
 }
 
 // 永続化はワールド単位。このアダプターだけがlocalStorageに触れる。
@@ -267,6 +331,39 @@ function calculateScore(card) {
   document.getElementById("editor-actions").setAttribute("aria-label", DATA.text.title);
   document.getElementById("list-actions").setAttribute("aria-label", DATA.text.playerList);
   document.getElementById("export-image").alt = DATA.text.imageAlt;
+  document.getElementById("series-select").setAttribute("aria-label", DATA.text.series);
+  document.getElementById("previous-series").setAttribute("aria-label", DATA.text.previousSeries);
+  document.getElementById("next-series").setAttribute("aria-label", DATA.text.nextSeries);
+
+  const modeField = document.getElementById("list-mode");
+  modeField.append(element("legend", "visually-hidden", DATA.text.listMode));
+  const modes = element("div", "segments");
+  DATA.listModes.forEach(item => modes.append(radioOption("listMode", "", item.id, item.name, "segment").label));
+  modeField.append(modes);
+  modeField.addEventListener("change", event => {
+    world.ui.listMode = event.target.value;
+    WORLD_STORAGE.save(world);
+    renderList();
+  });
+  function selectSeries(id) {
+    if (!isValidSeriesId(id) || compareSeries(id, world.latestSeriesId) > 0) return;
+    world.ui.seriesId = id;
+    WORLD_STORAGE.save(world);
+    renderList();
+  }
+  document.getElementById("series-select").addEventListener("change", event => selectSeries(event.target.value));
+  document.getElementById("previous-series").addEventListener("click", () => selectSeries(shiftSeries(world.ui.seriesId, -1)));
+  document.getElementById("next-series").addEventListener("click", () => selectSeries(shiftSeries(world.ui.seriesId, 1)));
+  document.getElementById("add-series").addEventListener("click", () => {
+    addWorldSeries(world);
+    WORLD_STORAGE.save(world);
+    renderList();
+  });
+  document.getElementById("delete-series").addEventListener("click", () => {
+    if (!deleteLatestSeries(world)) return;
+    WORLD_STORAGE.save(world);
+    renderList();
+  });
 
   const sortSelect = document.getElementById("list-sort");
   DATA.listSorts.forEach(item => {
@@ -287,7 +384,18 @@ function calculateScore(card) {
   }));
 
   function renderList() {
-    document.getElementById("list-series").textContent = seriesName(world.ui.seriesId);
+    const select = document.getElementById("series-select");
+    select.replaceChildren();
+    for (const id of seriesIds(world.latestSeriesId)) {
+      const option = element("option", "", seriesName(id));
+      option.value = id;
+      select.append(option);
+    }
+    select.value = world.ui.seriesId;
+    document.getElementById("previous-series").disabled = world.ui.seriesId === DATA.series.startId;
+    document.getElementById("next-series").disabled = world.ui.seriesId === world.latestSeriesId;
+    document.getElementById("delete-series").disabled = !canDeleteLatestSeries(world);
+    modeField.querySelectorAll("input").forEach(input => { input.checked = input.value === world.ui.listMode; });
     sortSelect.value = world.ui.sort;
     const list = document.getElementById("player-list");
     list.replaceChildren();
@@ -296,35 +404,153 @@ function calculateScore(card) {
     players.forEach(item => {
       const current = item.cards[world.ui.seriesId];
       const row = element("a", "player-row");
-      row.href = "#/edit/" + item.id + "/" + world.ui.seriesId;
+      row.href = "#/player/" + item.id;
       row.dataset.playerId = item.id;
-      row.style.setProperty("--surface", DATA.basic.surface.find(surface => surface.id === current.surface).color);
+      if (current) row.style.setProperty("--surface", DATA.basic.surface.find(surface => surface.id === current.surface).color);
+      else row.classList.add("missing-card");
       const identity = element("div", "list-identity");
       identity.append(element("strong", "list-name", item.name || DATA.text.anonymous));
-      if (current.nickname) identity.append(element("span", "list-nickname", current.nickname));
-      const icons = element("div", "list-icons");
-      [["playStyle", DATA.playStyles], ["serve", DATA.serves]].forEach(([key, items]) => {
-        const type = items.find(choice => choice.id === current[key]);
-        const image = element("img");
-        image.src = type.icon;
-        image.alt = type.name;
-        image.width = image.height = 28;
-        icons.append(image);
-      });
-      const score = calculateScore(current);
-      const overall = element("div", "list-overall");
-      overall.append(element("span", "list-overall-label", DATA.text.overall),
-        element("strong", "list-score", score.value.toLocaleString("ja-JP")), element("span", "list-rank", score.rank));
-      row.append(identity, icons, overall);
+      if (current?.nickname) identity.append(element("span", "list-nickname", current.nickname));
+      if (current) row.append(identity, cardIcons(current), cardOverall(current));
+      else row.append(identity, element("span", "", ""), element("strong", "list-score", DATA.text.missingScore));
       list.append(row);
     });
   }
 
+  function cardIcons(current) {
+    const icons = element("div", "list-icons");
+    [["playStyle", DATA.playStyles], ["serve", DATA.serves]].forEach(([key, items]) => {
+      const type = items.find(choice => choice.id === current[key]);
+      const image = element("img");
+      image.src = type.icon;
+      image.alt = type.name;
+      image.width = image.height = 28;
+      icons.append(image);
+    });
+    return icons;
+  }
+
+  function cardOverall(current) {
+    const score = calculateScore(current);
+    const overall = element("div", "list-overall");
+    overall.append(element("span", "list-overall-label", DATA.text.overall),
+      element("strong", "list-score", score.value.toLocaleString("ja-JP")), element("span", "list-rank", score.rank));
+    return overall;
+  }
+
+  function svgElement(tag, attributes = {}, text) {
+    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function renderHistory(entity) {
+    const points = scoreHistory(entity);
+    if (!points.length) return element("p", "no-cards", DATA.text.noCards);
+    const config = DATA.historyGraph;
+    const svg = svgElement("svg", { viewBox: `0 0 ${config.width} ${config.height}`, role: "img", "aria-label": DATA.text.scoreHistory, class: "history-graph" });
+    const plotWidth = config.width - config.left - config.right;
+    const plotHeight = config.height - config.top - config.bottom;
+    const maxScore = Math.ceil(points.reduce((max, point) => Math.max(max, point.value), DATA.score.min) / config.scoreStep) * config.scoreStep;
+    for (let tick = 0; tick <= config.ticks; tick++) {
+      const value = maxScore * tick / config.ticks;
+      const y = config.top + plotHeight * (1 - tick / config.ticks);
+      svg.append(svgElement("line", { x1: config.left, y1: y, x2: config.width - config.right, y2: y, stroke: DATA.colors.line }),
+        svgElement("text", { x: config.left - config.valueLabelGap, y: y + config.valueBaseline, "text-anchor": "end", fill: DATA.colors.muted }, value.toLocaleString("ja-JP")));
+    }
+    const first = seriesOrder(points[0].seriesId);
+    const span = seriesOrder(points[points.length - 1].seriesId) - first;
+    const coordinates = points.map(point => ({ ...point,
+      x: config.left + plotWidth * (span === 0n ? 0.5 : Number((seriesOrder(point.seriesId) - first) * BigInt(config.precision) / span) / config.precision),
+      y: config.top + plotHeight * (1 - point.value / maxScore)
+    }));
+    svg.append(svgElement("polyline", { points: coordinates.map(point => `${point.x},${point.y}`).join(" "), fill: "none", stroke: DATA.colors.navy, "stroke-width": config.lineWidth }));
+    const labelEvery = Math.max(1, Math.ceil((points.length - 1) / (config.maxLabels - 1)));
+    let lastLabelX = -Infinity;
+    coordinates.forEach((point, index) => {
+      const dot = svgElement("circle", { cx: point.x, cy: point.y, r: config.radius, fill: DATA.statRanks.find(rank => rank.rank === point.rank).color, "data-series": point.seriesId, "data-score": point.value });
+      dot.append(svgElement("title", {}, message(DATA.text.graphPoint, { series: seriesName(point.seriesId), score: point.value.toLocaleString("ja-JP"), rank: point.rank })));
+      svg.append(dot);
+      const last = index === points.length - 1;
+      if (last || (index % labelEvery === 0 && point.x - lastLabelX >= config.minLabelGap && coordinates[coordinates.length - 1].x - point.x >= config.minLabelGap)) {
+        const [year, period] = point.seriesId.split("-");
+        const anchor = points.length === 1 ? "middle" : index === 0 ? "start" : last ? "end" : "middle";
+        const label = svgElement("text", { x: point.x, y: config.top + plotHeight + config.seriesLabelGap, "text-anchor": anchor, fill: DATA.colors.muted });
+        label.append(svgElement("tspan", { x: point.x }, year), svgElement("tspan", { x: point.x, dy: config.labelLineHeight }, DATA.series.periods[period]));
+        svg.append(label);
+        lastLabelX = point.x;
+      }
+    });
+    svg.append(svgElement("text", { x: config.width / 2, y: config.height - config.axisBottom, "text-anchor": "middle", fill: DATA.colors.muted }, DATA.text.series));
+    return svg;
+  }
+
+  function deletePlayerButton(entity) {
+    const remove = element("button", "button delete-player", DATA.text.deletePlayer);
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      if (!window.confirm(message(DATA.text.deleteConfirm, { name: entity.name || DATA.text.anonymous }))) return;
+      deleteWorldPlayer(world, entity.id);
+      WORLD_STORAGE.save(world);
+      history.replaceState(null, "", "#/");
+      renderRoute();
+    });
+    return remove;
+  }
+
+  function renderPlayer(entity) {
+    const screen = document.getElementById("player-screen");
+    screen.replaceChildren();
+    const back = element("a", "button secondary", DATA.text.backToList);
+    back.href = "#/";
+    const identity = element("header", "detail-identity");
+    identity.append(element("h2", "detail-name", entity.name || DATA.text.anonymous));
+    const latestId = Object.keys(entity.cards).sort(compareSeries).pop();
+    if (latestId && entity.cards[latestId].nickname) identity.append(element("p", "", entity.cards[latestId].nickname));
+    identity.append(element("p", "detail-meta", DATA.playerFields.filter(key => DATA.basic[key]).map(key => {
+      const item = DATA.basic[key].find(item => item.id === entity[key]);
+      return item.cardName || item.name;
+    }).join(DATA.text.separator)));
+    const historyPanel = element("section", "detail-panel");
+    historyPanel.append(element("h3", "", DATA.text.scoreHistory), renderHistory(entity));
+    const timeline = element("section", "detail-panel");
+    timeline.append(element("h3", "", DATA.text.timeline));
+    const rows = element("ol", "timeline");
+    for (const seriesId of seriesIds(world.latestSeriesId, true)) {
+      const row = element("li");
+      row.dataset.series = seriesId;
+      const current = entity.cards[seriesId];
+      if (current) {
+        const link = element("a", "timeline-card");
+        link.href = "#/edit/" + entity.id + "/" + seriesId;
+        link.append(element("span", "timeline-series", seriesName(seriesId)), cardIcons(current), cardOverall(current));
+        row.append(link);
+      } else {
+        const content = element("div", "timeline-empty");
+        const create = element("button", "button secondary create-card", DATA.text.createCard);
+        create.type = "button";
+        create.addEventListener("click", () => {
+          if (!createWorldCard(entity, seriesId)) return;
+          WORLD_STORAGE.save(world);
+          location.hash = "#/edit/" + entity.id + "/" + seriesId;
+        });
+        content.append(element("span", "timeline-series", seriesName(seriesId)), create);
+        row.append(content);
+      }
+      rows.append(row);
+    }
+    timeline.append(rows);
+    screen.append(back, identity, historyPanel, timeline, deletePlayerButton(entity));
+  }
+
   function renderRoute() {
     const route = resolveEditRoute(world, location.hash);
-    if (!route && location.hash !== "#/") history.replaceState(null, "", "#/");
-    document.getElementById("list-screen").hidden = Boolean(route);
-    document.getElementById("list-actions").hidden = Boolean(route);
+    const detail = resolvePlayerRoute(world, location.hash);
+    if (!route && !detail && location.hash !== "#/") history.replaceState(null, "", "#/");
+    document.getElementById("list-screen").hidden = Boolean(route || detail);
+    document.getElementById("list-actions").hidden = Boolean(route || detail);
+    document.getElementById("player-screen").hidden = !detail;
     document.getElementById("editor-screen").hidden = !route;
     document.getElementById("editor-actions").hidden = !route;
     if (route) {
@@ -332,15 +558,23 @@ function calculateScore(card) {
       editingSeriesId = route.seriesId;
       player = { ...normalizeFixedFields(editingPlayer), ...normalizeCard(editingPlayer.cards[editingSeriesId]) };
       document.getElementById("editor-series").textContent = seriesName(editingSeriesId);
+      updateEditorBack();
       buildForm();
       syncForm();
       renderCard();
     } else {
       editingPlayer = player = undefined;
       editingSeriesId = undefined;
-      renderList();
+      if (detail) renderPlayer(detail);
+      else renderList();
     }
     window.scrollTo({ top: 0, behavior: "instant" });
+  }
+
+  function updateEditorBack() {
+    const back = document.getElementById("back-to-player");
+    back.href = "#/player/" + editingPlayer.id;
+    back.textContent = message(DATA.text.backToPlayer, { name: editingPlayer.name || DATA.text.anonymous });
   }
 
   function section(title) {
@@ -497,16 +731,30 @@ function calculateScore(card) {
       toast(DATA.text.resetDone);
     });
     form.append(reset);
-    const remove = element("button", "button delete-player", DATA.text.deletePlayer);
-    remove.type = "button";
-    remove.addEventListener("click", () => {
-      if (!window.confirm(message(DATA.text.deleteConfirm, { name: editingPlayer.name || DATA.text.anonymous }))) return;
-      deleteWorldPlayer(world, editingPlayer.id);
-      WORLD_STORAGE.save(world);
-      history.replaceState(null, "", "#/");
-      renderRoute();
+    const copy = element("button", "button secondary copy-previous", DATA.text.copyPrevious);
+    copy.type = "button";
+    const previous = nearestCardSeries(editingPlayer, editingSeriesId, false);
+    copy.disabled = !previous;
+    copy.addEventListener("click", () => {
+      if (!previous || !window.confirm(message(DATA.text.copyConfirm, { series: seriesName(previous) }))) return;
+      if (!copyPreviousCard(editingPlayer, editingSeriesId)) return;
+      player = { ...normalizeFixedFields(editingPlayer), ...normalizeCard(editingPlayer.cards[editingSeriesId]) };
+      commit();
+      toast(DATA.text.copyDone);
     });
-    form.append(remove);
+    form.append(copy);
+    if (Object.keys(editingPlayer.cards).length > 1) {
+      const remove = element("button", "button delete-player delete-card", DATA.text.deleteCard);
+      remove.type = "button";
+      remove.addEventListener("click", () => {
+        if (!window.confirm(message(DATA.text.deleteCardConfirm, { series: seriesName(editingSeriesId) }))) return;
+        if (!deleteWorldCard(editingPlayer, editingSeriesId)) return;
+        WORLD_STORAGE.save(world);
+        history.replaceState(null, "", "#/player/" + editingPlayer.id);
+        renderRoute();
+      });
+      form.append(remove);
+    } else form.append(element("p", "single-card-hint", DATA.text.singleCardHint));
   }
 
   function syncForm() {
@@ -643,6 +891,7 @@ function calculateScore(card) {
   function commit() {
     DATA.playerFields.forEach(key => { editingPlayer[key] = player[key]; });
     editingPlayer.cards[editingSeriesId] = normalizeCard(player);
+    updateEditorBack();
     syncForm();
     renderCard();
     WORLD_STORAGE.save(world);

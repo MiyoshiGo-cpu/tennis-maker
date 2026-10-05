@@ -222,3 +222,113 @@ test("編集ルートは実在する選手とカードだけを許可する", ()
     assert.equal(h.run(`resolveEditRoute(world,${JSON.stringify(hash)})`), null);
   }
 });
+
+test("シリーズを2019後半まで1期ずつ追加し、年越し・4桁超の年も扱う", () => {
+  const h = harness();
+  h.run('var world = createEmptyWorld(); for(let i=0;i<5;i++) addWorldSeries(world); WORLD_STORAGE.save(world);');
+  assert.equal(h.run("world.latestSeriesId"), "2019-2");
+  assert.equal(h.run("world.ui.seriesId"), "2019-2");
+  const expected = ["2017-1", "2017-2", "2018-1", "2018-2", "2019-1", "2019-2"];
+  assert.deepEqual(copy(h.run("Array.from(seriesIds(world.latestSeriesId))")), expected);
+  assert.deepEqual(copy(h.run("Array.from(seriesIds(world.latestSeriesId,true))")), expected.toReversed());
+  assert.equal(h.run('shiftSeries("2017-2",1)'), "2018-1");
+  assert.equal(h.run('shiftSeries("2018-1",-1)'), "2017-2");
+  assert.equal(h.run('shiftSeries("9999-2",1)'), "10000-1");
+  assert.equal(h.run('shiftSeries("99999999999999999999-2",1)'), "100000000000000000000-1");
+  const stored = JSON.parse(h.values.get("tennisMaker.v2.world"));
+  assert.equal(stored.latestSeriesId, "2019-2");
+  assert.ok(!("series" in stored) && !("seriesIds" in stored));
+});
+
+test("開始シリーズ・カードがある最新シリーズを削除せず、空の最新だけ削除する", () => {
+  const h = harness();
+  h.run('var world = createEmptyWorld();');
+  assert.equal(h.run("deleteLatestSeries(world)"), false);
+  h.run('addWorldSeries(world); var entity = addWorldPlayer(world);');
+  const before = copy(h.run("world"));
+  assert.equal(h.run("canDeleteLatestSeries(world)"), false);
+  assert.equal(h.run("deleteLatestSeries(world)"), false);
+  assert.deepEqual(copy(h.run("world")), before);
+  h.run('addWorldSeries(world);');
+  assert.equal(h.run("deleteLatestSeries(world)"), true);
+  assert.equal(h.run("world.latestSeriesId"), "2017-2");
+  assert.equal(h.run("world.ui.seriesId"), "2017-2");
+  h.run('addWorldSeries(world); world.ui.seriesId = "2017-1";');
+  assert.equal(h.run("deleteLatestSeries(world)"), true);
+  assert.equal(h.run("world.ui.seriesId"), "2017-1");
+});
+
+test("カード作成は最も近い前を優先し、前がないときは最も近い後・カードなしは初期値", () => {
+  const h = harness();
+  h.run(`var entity = normalizePlayer({id:"p_copy12345",name:"固定",hand:"left",backhand:"one",cards:{
+    "2017-1":{nickname:"古い",stats:{control:70}},
+    "2018-1":{nickname:"近い前",surface:"clay",stats:{power:88},shotSkills:{volley:"great"},rankSkills:{clutch:"A"},gold:["ironman"],plus:["rising"],minus:["streaky"]},
+    "2019-2":{nickname:"後",stats:{power:99}}
+  }});`);
+  const before = copy(h.run("entity"));
+  assert.equal(h.run('createWorldCard(entity,"2019-1")'), true);
+  assert.deepEqual(copy(h.run('entity.cards["2019-1"]')), before.cards["2018-1"]);
+  h.run('entity.cards["2019-1"].stats.power=1; entity.cards["2019-1"].gold.push("precision");');
+  assert.deepEqual(copy(h.run('entity.cards["2018-1"]')), before.cards["2018-1"]);
+  assert.equal(h.run('createWorldCard(entity,"2019-1")'), false);
+  assert.equal(h.run('createWorldCard(entity,"2016-2")'), false);
+  for (const key of ["id", "name", "hand", "backhand", "createdAt"]) assert.equal(h.run(`entity.${key}`), before[key]);
+  h.run('var future = normalizePlayer({cards:{"2018-2":{nickname:"近い後"},"2019-1":{nickname:"遠い後"}}}); createWorldCard(future,"2017-1");');
+  assert.equal(h.run('future.cards["2017-1"].nickname'), "近い後");
+  h.run('var empty = normalizePlayer({cards:{}}); createWorldCard(empty,"2017-1");');
+  assert.deepEqual(copy(h.run('empty.cards["2017-1"]')), copy(h.run("createDefaultCard()")));
+});
+
+test("前のシリーズからコピーは前のみを使い、元カードと固定情報を保持する", () => {
+  const h = harness();
+  h.run('var entity=normalizePlayer({name:"選手",hand:"left",cards:{"2017-1":{nickname:"前"},"2018-2":{nickname:"近い前",plus:["rising"]},"2019-2":{nickname:"現在",gold:["precision"]},"2020-1":{nickname:"後"}}});');
+  const original = copy(h.run("entity"));
+  assert.equal(h.run('copyPreviousCard(entity,"2017-1")'), false);
+  assert.equal(h.run('copyPreviousCard(entity,"2019-1")'), false);
+  assert.equal(h.run('copyPreviousCard(entity,"2019-2")'), true);
+  assert.deepEqual(copy(h.run('entity.cards["2019-2"]')), original.cards["2018-2"]);
+  h.run('entity.cards["2019-2"].plus.push("high_point");');
+  assert.deepEqual(copy(h.run('entity.cards["2018-2"]')), original.cards["2018-2"]);
+  assert.equal(h.run("entity.name"), "選手");
+  assert.equal(h.run("entity.hand"), "left");
+});
+
+test("カード削除は2枚以上の時だけ許可し、最新が空になったときだけシリーズ削除を許可する", () => {
+  const h = harness();
+  h.run('var world=normalizeWorld({players:[{id:"p_card12345",cards:{"2017-1":{},"2019-2":{}}}]}); var entity=world.players[0];');
+  assert.equal(h.run("canDeleteLatestSeries(world)"), false);
+  assert.equal(h.run('deleteWorldCard(entity,"2018-1")'), false);
+  assert.equal(h.run('deleteWorldCard(entity,"2019-2")'), true);
+  assert.equal(h.run("canDeleteLatestSeries(world)"), true);
+  assert.equal(h.run('deleteWorldCard(entity,"2017-1")'), false);
+  assert.deepEqual(copy(h.run("Object.keys(entity.cards)")), ["2017-1"]);
+});
+
+test("推移グラフのデータは欠けたシリーズを補わず、シリーズ順の総合力・ランクになる", () => {
+  const h = harness();
+  h.run('var entity=normalizePlayer({cards:{"2019-2":{stats:{control:99,power:99,speed:99,stamina:99,mental:99,net:99}},"2017-1":{},"2018-2":{stats:{control:80,power:80,speed:80}}}});');
+  assert.deepEqual(copy(h.run("scoreHistory(entity)")), [
+    {seriesId:"2017-1",value:2000,rank:"D"},
+    {seriesId:"2018-2",value:2840,rank:"B"},
+    {seriesId:"2019-2",value:3960,rank:"S"}
+  ]);
+  assert.deepEqual(copy(h.run("scoreHistory(normalizePlayer({cards:{}}))")), []);
+});
+
+test("表示シリーズ・全選手表示を保存復元し、カードなしは総合力順で後ろに出す", () => {
+  const h = harness();
+  h.run('var world=normalizeWorld({players:[{id:"p_old12345",name:"カードなし",cards:{"2017-1":{}}},{id:"p_new12345",name:"カードあり",cards:{"2019-2":{}}}],ui:{seriesId:"2019-2",listMode:"all",sort:"score"}}); WORLD_STORAGE.save(world);');
+  assert.deepEqual(copy(h.run("WORLD_STORAGE.load().ui")), {seriesId:"2019-2",listMode:"all",sort:"score",lastExportedAt:null});
+  assert.deepEqual(copy(h.run("listSeriesPlayers(world).map(p=>p.name)")), ["カードあり", "カードなし"]);
+  h.run('world.ui.listMode="series";');
+  assert.deepEqual(copy(h.run("listSeriesPlayers(world).map(p=>p.name)")), ["カードあり"]);
+  assert.equal(h.run('normalizeWorld({ui:{listMode:"invalid",sort:"invalid"}}).ui.listMode'), "series");
+  assert.equal(h.run('normalizeWorld({ui:{listMode:"invalid",sort:"invalid"}}).ui.sort'), "score");
+});
+
+test("選手詳細ルートはカード0枚でも開け、存在しない選手は拒否する", () => {
+  const h = harness();
+  h.run('var world=normalizeWorld({players:[{id:"p_valid1234",cards:{}}]});');
+  assert.equal(h.run('resolvePlayerRoute(world,"#/player/p_valid1234").id'), "p_valid1234");
+  for(const hash of ["#/player/p_missing1234", "#/player/p_valid1234/extra", "#/", "#/edit/p_valid1234/2017-1"]) assert.equal(h.run(`resolvePlayerRoute(world,${JSON.stringify(hash)})`), null);
+});

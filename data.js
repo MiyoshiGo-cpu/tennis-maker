@@ -14,6 +14,13 @@ const DATA = {
   listSorts: [
     { id: "score", name: "総合力順" }, { id: "name", name: "名前順" }, { id: "created", name: "登録順" }
   ],
+  listModes: [{ id: "series", name: "このシリーズ" }, { id: "all", name: "全選手" }],
+  historyGraph: {
+    width: 640, height: 270, left: 58, right: 22, top: 24, bottom: 62,
+    ticks: 4, scoreStep: 1000, radius: 5, lineWidth: 2,
+    maxLabels: 4, minLabelGap: 80, precision: 10000,
+    valueLabelGap: 8, valueBaseline: 4, seriesLabelGap: 20, labelLineHeight: 16, axisBottom: 4
+  },
   playerId: { prefix: "p_", radix: 36, randomLength: 4 },
   text: {
     title: "テニス能力メーカー",
@@ -27,6 +34,16 @@ const DATA = {
     playerList: "選手一覧", backToList: "← 一覧へ", commonFields: "全シリーズ共通",
     addPlayer: "選手を追加", emptyPlayers: "まだ選手がいません", sort: "並び替え",
     deletePlayer: "この選手を削除", deleteConfirm: "{name}のすべてのカードを削除します。よろしいですか？",
+    previousSeries: "前のシリーズ", nextSeries: "次のシリーズ", previousMark: "◀", nextMark: "▶",
+    series: "シリーズ", listMode: "一覧の表示", seriesManagement: "シリーズ管理",
+    addSeries: "次のシリーズを追加", deleteSeries: "最新シリーズを削除",
+    backToPlayer: "← {name}", scoreHistory: "総合力の推移", timeline: "シリーズ年表",
+    noCards: "まだカードがありません", createCard: "カードを作成", missingScore: "−",
+    graphPoint: "{series}：総合力 {score}、ランク {rank}",
+    copyPrevious: "前のシリーズからコピー", copyConfirm: "{series}のカードをコピーして、このカードを上書きします。よろしいですか？",
+    copyDone: "前のシリーズのカードをコピーしました。", deleteCard: "このカードを削除",
+    deleteCardConfirm: "{series}のカードを削除します。よろしいですか？",
+    singleCardHint: "選手ごと削除する場合は選手詳細から削除してください",
     saving: "画像を作成中…", saveHint: "画像を長押しして保存してください",
     download: "PNGをダウンロード", close: "閉じる", imageAlt: "作成した選手カード",
     exportError: "画像を作成できませんでした。通信状況を確認して、もう一度お試しください。",
