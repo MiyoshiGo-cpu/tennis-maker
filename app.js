@@ -158,8 +158,37 @@ function normalizeWorld(raw) {
   return world;
 }
 
-function createWorldPlayer(editorPlayer, usedIds = new Set()) {
-  return normalizePlayer({ ...normalizeFixedFields(editorPlayer), cards: { [DATA.series.startId]: normalizeCard(editorPlayer) } }, usedIds);
+function createWorldPlayer(editorPlayer, usedIds = new Set(), seriesId = DATA.series.startId) {
+  return normalizePlayer({ ...normalizeFixedFields(editorPlayer), cards: { [seriesId]: normalizeCard(editorPlayer) } }, usedIds);
+}
+
+function addWorldPlayer(world) {
+  const player = createWorldPlayer(createDefaultEditorPlayer(), new Set(world.players.map(item => item.id)), world.ui.seriesId);
+  world.players.push(player);
+  return player;
+}
+
+function resetWorldCard(player, seriesId) {
+  player.cards[seriesId] = createDefaultCard();
+}
+
+function deleteWorldPlayer(world, playerId) {
+  world.players = world.players.filter(player => player.id !== playerId);
+}
+
+function listSeriesPlayers(world) {
+  return world.players.filter(player => Object.hasOwn(player.cards, world.ui.seriesId)).sort((a, b) => {
+    if (world.ui.sort === "name") return (a.name || DATA.text.anonymous).localeCompare(b.name || DATA.text.anonymous, "ja");
+    if (world.ui.sort === "created") return Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    return calculateScore(b.cards[world.ui.seriesId]).value - calculateScore(a.cards[world.ui.seriesId]).value;
+  });
+}
+
+function resolveEditRoute(world, hash) {
+  const match = /^#\/edit\/(p_[a-z0-9]+)\/(\d{4,}-[12])$/.exec(hash);
+  if (!match) return null;
+  const player = world.players.find(item => item.id === match[1]);
+  return player && Object.hasOwn(player.cards, match[2]) ? { player, seriesId: match[2] } : null;
 }
 
 // 永続化はワールド単位。このアダプターだけがlocalStorageに触れる。
@@ -209,21 +238,10 @@ function calculateScore(card) {
 
 (function () {
   const world = WORLD_STORAGE.load();
-  let created = false;
-  // ステップ1の単画面用の仮処理。ステップ2では選手0人の一覧を表示する。
-  if (!world.players.length) {
-    world.players.push(createWorldPlayer(createDefaultEditorPlayer()));
-    created = true;
-  }
-  const editingPlayer = world.players[0];
-  if (!Object.keys(editingPlayer.cards).length) {
-    editingPlayer.cards[DATA.series.startId] = createDefaultCard();
-    created = true;
-  }
-  const editingSeriesId = Object.keys(editingPlayer.cards).sort(compareSeries)[0];
+  let editingPlayer;
+  let editingSeriesId;
   // 既存フォームは固定項目とカード項目を結合した編集用データを扱う。
-  let player = { ...normalizeFixedFields(editingPlayer), ...editingPlayer.cards[editingSeriesId] };
-  if (created) WORLD_STORAGE.save(world);
+  let player;
   let toastTimer;
   let exporting = false;
   let imageUrl;
@@ -246,8 +264,84 @@ function calculateScore(card) {
   Object.entries(DATA.colors).forEach(([key, value]) => document.documentElement.style.setProperty("--" + key, value));
   document.title = DATA.text.title;
   document.querySelectorAll("[data-text]").forEach(node => { node.textContent = DATA.text[node.dataset.text]; });
-  document.querySelector(".mobile-actions").setAttribute("aria-label", DATA.text.title);
+  document.getElementById("editor-actions").setAttribute("aria-label", DATA.text.title);
+  document.getElementById("list-actions").setAttribute("aria-label", DATA.text.playerList);
   document.getElementById("export-image").alt = DATA.text.imageAlt;
+
+  const sortSelect = document.getElementById("list-sort");
+  DATA.listSorts.forEach(item => {
+    const option = element("option", "", item.name);
+    option.value = item.id;
+    sortSelect.append(option);
+  });
+  if (!DATA.listSorts.some(item => item.id === world.ui.sort)) world.ui.sort = DATA.worldUi.sort;
+  sortSelect.addEventListener("change", () => {
+    world.ui.sort = sortSelect.value;
+    WORLD_STORAGE.save(world);
+    renderList();
+  });
+  document.querySelectorAll("[data-add-player]").forEach(button => button.addEventListener("click", () => {
+    const added = addWorldPlayer(world);
+    WORLD_STORAGE.save(world);
+    location.hash = "#/edit/" + added.id + "/" + world.ui.seriesId;
+  }));
+
+  function renderList() {
+    document.getElementById("list-series").textContent = seriesName(world.ui.seriesId);
+    sortSelect.value = world.ui.sort;
+    const list = document.getElementById("player-list");
+    list.replaceChildren();
+    const players = listSeriesPlayers(world);
+    document.getElementById("empty-players").hidden = players.length > 0;
+    players.forEach(item => {
+      const current = item.cards[world.ui.seriesId];
+      const row = element("a", "player-row");
+      row.href = "#/edit/" + item.id + "/" + world.ui.seriesId;
+      row.dataset.playerId = item.id;
+      row.style.setProperty("--surface", DATA.basic.surface.find(surface => surface.id === current.surface).color);
+      const identity = element("div", "list-identity");
+      identity.append(element("strong", "list-name", item.name || DATA.text.anonymous));
+      if (current.nickname) identity.append(element("span", "list-nickname", current.nickname));
+      const icons = element("div", "list-icons");
+      [["playStyle", DATA.playStyles], ["serve", DATA.serves]].forEach(([key, items]) => {
+        const type = items.find(choice => choice.id === current[key]);
+        const image = element("img");
+        image.src = type.icon;
+        image.alt = type.name;
+        image.width = image.height = 28;
+        icons.append(image);
+      });
+      const score = calculateScore(current);
+      const overall = element("div", "list-overall");
+      overall.append(element("span", "list-overall-label", DATA.text.overall),
+        element("strong", "list-score", score.value.toLocaleString("ja-JP")), element("span", "list-rank", score.rank));
+      row.append(identity, icons, overall);
+      list.append(row);
+    });
+  }
+
+  function renderRoute() {
+    const route = resolveEditRoute(world, location.hash);
+    if (!route && location.hash !== "#/") history.replaceState(null, "", "#/");
+    document.getElementById("list-screen").hidden = Boolean(route);
+    document.getElementById("list-actions").hidden = Boolean(route);
+    document.getElementById("editor-screen").hidden = !route;
+    document.getElementById("editor-actions").hidden = !route;
+    if (route) {
+      editingPlayer = route.player;
+      editingSeriesId = route.seriesId;
+      player = { ...normalizeFixedFields(editingPlayer), ...normalizeCard(editingPlayer.cards[editingSeriesId]) };
+      document.getElementById("editor-series").textContent = seriesName(editingSeriesId);
+      buildForm();
+      syncForm();
+      renderCard();
+    } else {
+      editingPlayer = player = undefined;
+      editingSeriesId = undefined;
+      renderList();
+    }
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
 
   function section(title) {
     const details = element("details", "form-section");
@@ -290,6 +384,7 @@ function calculateScore(card) {
       const heading = element("span", "field-heading", field.name);
       const hint = message(DATA.text.maxLength, { max: field.max }) + (field.optional ? DATA.text.separator + DATA.text.optional : "");
       heading.append(element("small", "", hint));
+      if (DATA.playerFields.includes(field.id)) heading.append(element("small", "common-fields", DATA.text.commonFields));
       const input = element("input");
       input.type = "text";
       input.name = field.id;
@@ -303,6 +398,7 @@ function calculateScore(card) {
     });
     Object.entries(DATA.basic).forEach(([key, items]) => {
       const field = legendField(DATA.basicLabels[key], "basic-choice");
+      if (DATA.playerFields.includes(key)) field.querySelector("legend").append(element("small", "common-fields", DATA.text.commonFields));
       const options = element("div", "segments");
       items.forEach(item => options.append(radioOption("basic", key, item.id, item.name, "segment").label));
       field.append(options);
@@ -395,11 +491,22 @@ function calculateScore(card) {
     reset.type = "button";
     reset.addEventListener("click", () => {
       if (!window.confirm(DATA.text.resetConfirm)) return;
-      player = createDefaultEditorPlayer();
+      resetWorldCard(editingPlayer, editingSeriesId);
+      player = { ...normalizeFixedFields(editingPlayer), ...editingPlayer.cards[editingSeriesId] };
       commit();
       toast(DATA.text.resetDone);
     });
     form.append(reset);
+    const remove = element("button", "button delete-player", DATA.text.deletePlayer);
+    remove.type = "button";
+    remove.addEventListener("click", () => {
+      if (!window.confirm(message(DATA.text.deleteConfirm, { name: editingPlayer.name || DATA.text.anonymous }))) return;
+      deleteWorldPlayer(world, editingPlayer.id);
+      WORLD_STORAGE.save(world);
+      history.replaceState(null, "", "#/");
+      renderRoute();
+    });
+    form.append(remove);
   }
 
   function syncForm() {
@@ -552,7 +659,7 @@ function calculateScore(card) {
   function handleInput(event) {
     const input = event.target;
     const { group, key } = input.dataset;
-    if (!group || event.isComposing) return;
+    if (!player || !group || event.isComposing) return;
     if (group === "stats") {
       if (input.value === "" || !Number.isFinite(input.valueAsNumber)) {
         if (event.type === "change") input.value = player.stats[key];
@@ -632,7 +739,7 @@ function calculateScore(card) {
   }
 
   async function exportImage() {
-    if (exporting) return;
+    if (exporting || !player) return;
     exporting = true;
     saveButtons.forEach(button => { button.disabled = true; button.textContent = DATA.text.saving; });
     // 出力中の入力やスクロールに影響されないよう、現在のカードを固定して撮影する。
@@ -692,7 +799,6 @@ function calculateScore(card) {
     imageUrl = undefined;
   });
 
-  buildForm();
-  syncForm();
-  renderCard();
+  window.addEventListener("hashchange", renderRoute);
+  renderRoute();
 })();

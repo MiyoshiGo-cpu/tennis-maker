@@ -154,3 +154,71 @@ test("総合力の4つの検算値はカード単位で一致する", () => {
   })()`));
   assert.deepEqual(actual, [{ value: 2000, rank: "D" }, { value: 3960, rank: "S" }, { value: 2840, rank: "B" }, { value: 3080, rank: "B" }]);
 });
+
+test("表示中のシリーズに初期カード付き選手を3人追加し、保存後もIDが重複しない", () => {
+  const h = harness();
+  h.run('var world = createEmptyWorld(); world.latestSeriesId = world.ui.seriesId = "2019-2"; for (let i=0; i<3; i++) addWorldPlayer(world); WORLD_STORAGE.save(world);');
+  const world = copy(h.run("WORLD_STORAGE.load()"));
+  assert.equal(world.players.length, 3);
+  assert.equal(new Set(world.players.map(player => player.id)).size, 3);
+  const initial = copy(h.run("createDefaultCard()"));
+  for (const player of world.players) {
+    assert.match(player.id, /^p_[a-z0-9]+$/);
+    assert.equal(player.name, "");
+    assert.equal(player.hand, "right");
+    assert.equal(player.backhand, "two");
+    assert.deepEqual(player.cards, { "2019-2": initial });
+  }
+});
+
+test("一覧は表示シリーズのカードがある選手のみ、総合力・名前・登録順で並ぶ", () => {
+  const h = harness();
+  h.run(`var world = normalizeWorld({players: [
+    {id:"p_first1234", name:"う", createdAt:"2026-10-01T00:00:00Z", cards:{"2017-1":{stats:{power:99}}}},
+    {id:"p_second1234", name:"あ", createdAt:"2026-10-02T00:00:00Z", cards:{"2017-1":{stats:{power:60}}}},
+    {id:"p_third1234", name:"い", createdAt:"2026-10-03T00:00:00Z", cards:{"2017-1":{stats:{power:80}}}},
+    {id:"p_hidden1234", name:"別シリーズ", cards:{"2017-2":{}}}
+  ]});`);
+  const order = sort => copy(h.run(`world.ui.sort = "${sort}"; listSeriesPlayers(world).map(player=>player.name)`));
+  assert.deepEqual(order("score"), ["う", "い", "あ"]);
+  assert.deepEqual(order("name"), ["あ", "い", "う"]);
+  assert.deepEqual(order("created"), ["う", "あ", "い"]);
+  assert.deepEqual(copy(h.run("world.players.map(player=>player.name)")), ["う", "あ", "い", "別シリーズ"]);
+  h.run('world.ui.seriesId = "2017-2";');
+  assert.deepEqual(order("score"), ["別シリーズ"]);
+  h.run('world.ui.seriesId = "2017-1"; world.players[0].cards["2017-1"].stats.power = 60; world.ui.sort="score";');
+  assert.deepEqual(copy(h.run("listSeriesPlayers(world).map(p=>p.name)")), ["い", "う", "あ"]);
+});
+
+test("リセットは対象カードだけ、選手削除は全カードを削除し他の選手・UI・v1を保持する", () => {
+  const h = harness({ "tennisMaker.v1.player": "legacy backup" });
+  h.run(`var world = normalizeWorld({players:[
+    {id:"p_first1234", name:"選手", hand:"left", backhand:"one", cards:{"2017-1":{nickname:"二つ名",gold:["ironman"]},"2017-2":{stats:{power:99}}}},
+    {id:"p_second1234", name:"別選手", cards:{"2017-1":{}}}
+  ],ui:{seriesId:"2017-1",sort:"name"}});`);
+  const before = copy(h.run("world"));
+  h.run('resetWorldCard(world.players[0], "2017-1"); WORLD_STORAGE.save(world);');
+  const reset = copy(h.run("WORLD_STORAGE.load()"));
+  assert.deepEqual(reset.players[0].cards["2017-1"], copy(h.run("createDefaultCard()")));
+  for (const key of ["id", "name", "hand", "backhand", "createdAt"]) assert.equal(reset.players[0][key], before.players[0][key]);
+  assert.deepEqual(reset.players[0].cards["2017-2"], before.players[0].cards["2017-2"]);
+  h.run('deleteWorldPlayer(world,"p_first1234"); WORLD_STORAGE.save(world);');
+  const removed = copy(h.run("WORLD_STORAGE.load()"));
+  assert.deepEqual(removed.players, [before.players[1]]);
+  assert.deepEqual(removed.ui, before.ui);
+  assert.equal(removed.latestSeriesId, before.latestSeriesId);
+  assert.equal(h.values.get("tennisMaker.v1.player"), "legacy backup");
+  h.run('deleteWorldPlayer(world,"p_second1234"); WORLD_STORAGE.save(world);');
+  assert.deepEqual(copy(h.run("WORLD_STORAGE.load().players")), []);
+});
+
+test("編集ルートは実在する選手とカードだけを許可する", () => {
+  const h = harness();
+  h.run('var world = normalizeWorld({players:[{id:"p_valid1234",cards:{"2017-1":{}}}]});');
+  const route = copy(h.run('resolveEditRoute(world,"#/edit/p_valid1234/2017-1")'));
+  assert.equal(route.player.id, "p_valid1234");
+  assert.equal(route.seriesId, "2017-1");
+  for (const hash of ["#/", "", "#/edit/p_missing1234/2017-1", "#/edit/p_valid1234/2017-2", "#/edit/p_valid1234/2017-3", "#/edit/p_valid1234/2017-1/extra", "#/player/p_valid1234"]) {
+    assert.equal(h.run(`resolveEditRoute(world,${JSON.stringify(hash)})`), null);
+  }
+});

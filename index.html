@@ -12,16 +12,39 @@
   <header class="page-header">
     <h1 data-text="title"></h1>
   </header>
-  <main class="workspace">
-    <aside class="preview">
-      <article id="player-card" class="player-card" aria-labelledby="card-name"></article>
-      <button type="button" class="button primary desktop-save" data-save data-text="saveImage"></button>
-    </aside>
-    <form id="player-form" novalidate></form>
+  <main>
+    <section id="list-screen" class="list-screen" aria-labelledby="list-series">
+      <div class="list-toolbar">
+        <h2 id="list-series" class="list-series"></h2>
+        <button type="button" class="button primary desktop-add" data-add-player data-text="addPlayer"></button>
+      </div>
+      <label class="sort-control"><span data-text="sort"></span><select id="list-sort"></select></label>
+      <div id="player-list" class="player-list"></div>
+      <div id="empty-players" class="empty-players" hidden>
+        <p data-text="emptyPlayers"></p>
+        <button type="button" class="button primary" data-add-player data-text="addPlayer"></button>
+      </div>
+    </section>
+    <section id="editor-screen" hidden>
+      <div class="editor-heading">
+        <a href="#/" class="button secondary" data-text="backToList"></a>
+        <span id="editor-series"></span>
+      </div>
+      <div class="workspace">
+        <aside class="preview">
+          <article id="player-card" class="player-card" aria-labelledby="card-name"></article>
+          <button type="button" class="button primary desktop-save" data-save data-text="saveImage"></button>
+        </aside>
+        <form id="player-form" novalidate></form>
+      </div>
+    </section>
   </main>
-  <nav class="mobile-actions">
+  <nav id="editor-actions" class="mobile-actions" hidden>
     <button type="button" class="button secondary" id="view-card" data-text="viewCard"></button>
     <button type="button" class="button primary" data-save data-text="saveImage"></button>
+  </nav>
+  <nav id="list-actions" class="mobile-actions list-actions">
+    <button type="button" class="button primary" data-add-player data-text="addPlayer"></button>
   </nav>
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <dialog id="image-dialog" aria-labelledby="image-title">

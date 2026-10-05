@@ -11,6 +11,9 @@ const DATA = {
     label: "{year} {period}", fileLabel: "{year}{period}"
   },
   worldUi: { listMode: "series", sort: "score", lastExportedAt: null },
+  listSorts: [
+    { id: "score", name: "総合力順" }, { id: "name", name: "名前順" }, { id: "created", name: "登録順" }
+  ],
   playerId: { prefix: "p_", radix: 36, randomLength: 4 },
   text: {
     title: "テニス能力メーカー",
@@ -19,8 +22,11 @@ const DATA = {
     frontStats: "表ステータス", backStats: "裏ステータス",
     anonymous: "名無しの選手", overall: "総合", noSkills: "特殊能力なし",
     saveImage: "画像で保存", viewCard: "カードを見る", reset: "初期値に戻す",
-    resetConfirm: "入力内容をすべて初期値に戻します。よろしいですか？",
-    resetDone: "入力内容を初期値に戻しました。",
+    resetConfirm: "このカードの項目を初期値に戻します。名前・利き手・バックハンドは戻りません。よろしいですか？",
+    resetDone: "このカードの項目を初期値に戻しました。",
+    playerList: "選手一覧", backToList: "← 一覧へ", commonFields: "全シリーズ共通",
+    addPlayer: "選手を追加", emptyPlayers: "まだ選手がいません", sort: "並び替え",
+    deletePlayer: "この選手を削除", deleteConfirm: "{name}のすべてのカードを削除します。よろしいですか？",
     saving: "画像を作成中…", saveHint: "画像を長押しして保存してください",
     download: "PNGをダウンロード", close: "閉じる", imageAlt: "作成した選手カード",
     exportError: "画像を作成できませんでした。通信状況を確認して、もう一度お試しください。",
