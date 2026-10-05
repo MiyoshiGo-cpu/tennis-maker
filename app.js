@@ -234,6 +234,73 @@ function scoreHistory(player) {
   return Object.keys(player.cards).sort(compareSeries).map(seriesId => ({ seriesId, ...calculateScore(player.cards[seriesId]) }));
 }
 
+function historyScale(points) {
+  if (!points.length) return null;
+  const config = DATA.historyGraph;
+  const low = points.reduce((value, point) => Math.min(value, point.value), Infinity);
+  const high = points.reduce((value, point) => Math.max(value, point.value), -Infinity);
+  const padding = Math.max(config.minPadding, (high - low) * config.paddingRatio);
+  const rawStep = (high - low + padding * 2) / config.ticks;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const step = config.tickSteps.find(value => value * magnitude >= rawStep) * magnitude;
+  const min = Math.max(0, Math.floor((low - padding) / step) * step);
+  const max = Math.ceil((high + padding) / step) * step;
+  const ticks = [];
+  for (let value = min; value <= max; value += step) ticks.push(value);
+  return {
+    min, max, ticks,
+    boundaries: DATA.score.ranks.slice(0, -1).filter(rank => rank.min >= min && rank.min <= max)
+  };
+}
+
+function dateParts(date) {
+  return { year: String(date.getFullYear()), month: String(date.getMonth() + 1).padStart(2, "0"), day: String(date.getDate()).padStart(2, "0") };
+}
+
+function formatDateLabel(template, date) {
+  const parts = dateParts(date);
+  return template.replace(/\{(\w+)\}/g, (_, key) => parts[key]);
+}
+
+function prepareWorldExport(world, date = new Date()) {
+  const snapshot = normalizeWorld(world);
+  snapshot.ui.lastExportedAt = date.toISOString();
+  return { world: snapshot, text: JSON.stringify(snapshot, null, DATA.backup.jsonIndent), filename: formatDateLabel(DATA.backup.fileLabel, date) };
+}
+
+function parseWorldImport(text) {
+  const raw = JSON.parse(text);
+  const record = value => value && typeof value === "object" && !Array.isArray(value);
+  if (!record(raw)) throw new Error("Invalid import format");
+  if (raw.version === DATA.version && Array.isArray(raw.players)
+    && raw.players.every(player => record(player) && record(player.cards))
+    && (raw.ui === undefined || record(raw.ui))) return normalizeWorld(raw);
+  if (raw.version === 1) {
+    const fields = [...DATA.playerFields, ...Object.keys(createDefaultCard())];
+    if (fields.some(key => Object.hasOwn(raw, key))) {
+      const world = createEmptyWorld();
+      world.players.push(createWorldPlayer(normalizeLegacyPlayer(raw)));
+      return world;
+    }
+  }
+  throw new Error("Invalid import format");
+}
+
+function importWorld(world, imported, mode) {
+  if (mode === "replace") return normalizeWorld(imported);
+  if (mode !== "append") throw new Error("Invalid import mode");
+  const merged = normalizeWorld(world);
+  const usedIds = new Set(merged.players.map(player => player.id));
+  normalizeWorld(imported).players.forEach(player => merged.players.push(normalizePlayer(player, usedIds)));
+  if (compareSeries(imported.latestSeriesId, merged.latestSeriesId) > 0) merged.latestSeriesId = imported.latestSeriesId;
+  return merged;
+}
+
+function needsBackup(world, now = Date.now()) {
+  return world.players.length > 0 && (world.ui.lastExportedAt === null
+    || now - Date.parse(world.ui.lastExportedAt) >= DATA.backup.warningDays * DATA.backup.dayMs);
+}
+
 function listSeriesPlayers(world) {
   return world.players.filter(player => world.ui.listMode === "all" || Object.hasOwn(player.cards, world.ui.seriesId)).sort((a, b) => {
     if (world.ui.sort === "name") return (a.name || DATA.text.anonymous).localeCompare(b.name || DATA.text.anonymous, "ja");
@@ -256,7 +323,7 @@ function resolvePlayerRoute(world, hash) {
 }
 
 // 永続化はワールド単位。このアダプターだけがlocalStorageに触れる。
-function loadWorld() {
+function loadWorld(onSaveError) {
   try {
     const serialized = localStorage.getItem(DATA.storageKey);
     if (serialized !== null) return normalizeWorld(JSON.parse(serialized));
@@ -266,7 +333,7 @@ function loadWorld() {
       if (JSON.stringify(player) !== JSON.stringify(createDefaultEditorPlayer())) {
         const world = createEmptyWorld();
         world.players.push(createWorldPlayer(player));
-        saveWorld(world);
+        if (!saveWorld(world) && onSaveError) onSaveError();
         return world;
       }
     }
@@ -301,12 +368,12 @@ function calculateScore(card) {
 }
 
 (function () {
-  const world = WORLD_STORAGE.load();
+  let toastTimer;
+  let world = WORLD_STORAGE.load(() => toast(DATA.text.storageError));
   let editingPlayer;
   let editingSeriesId;
   // 既存フォームは固定項目とカード項目を結合した編集用データを扱う。
   let player;
-  let toastTimer;
   let exporting = false;
   let imageUrl;
   const form = document.getElementById("player-form");
@@ -326,6 +393,7 @@ function calculateScore(card) {
   }
 
   Object.entries(DATA.colors).forEach(([key, value]) => document.documentElement.style.setProperty("--" + key, value));
+  document.documentElement.style.setProperty("--page-font", DATA.fonts.page);
   document.title = DATA.text.title;
   document.querySelectorAll("[data-text]").forEach(node => { node.textContent = DATA.text[node.dataset.text]; });
   document.getElementById("editor-actions").setAttribute("aria-label", DATA.text.title);
@@ -335,6 +403,98 @@ function calculateScore(card) {
   document.getElementById("previous-series").setAttribute("aria-label", DATA.text.previousSeries);
   document.getElementById("next-series").setAttribute("aria-label", DATA.text.nextSeries);
 
+  function persistWorld() {
+    if (WORLD_STORAGE.save(world)) return true;
+    toast(DATA.text.storageError);
+    return false;
+  }
+
+  function renderBackup() {
+    const last = world.ui.lastExportedAt;
+    document.getElementById("last-exported").textContent = last
+      ? message(DATA.text.lastExport, { date: formatDateLabel(DATA.backup.dateLabel, new Date(last)) }) : DATA.text.neverExported;
+    document.getElementById("backup-warning").hidden = !needsBackup(world);
+  }
+
+  const importField = document.getElementById("import-mode");
+  importField.append(element("legend", "", DATA.text.importMode));
+  const importOptions = element("div", "segments");
+  DATA.importModes.forEach((item, index) => {
+    const option = radioOption("importMode", "", item.id, item.name, "segment");
+    option.label.querySelector("input").checked = index === 0;
+    importOptions.append(option.label);
+  });
+  importField.append(importOptions);
+  const jsonInput = document.getElementById("json-file");
+  jsonInput.accept = DATA.backup.accept;
+  jsonInput.setAttribute("aria-label", DATA.text.importJson);
+  document.getElementById("import-json").addEventListener("click", () => jsonInput.click());
+  jsonInput.addEventListener("change", async () => {
+    const file = jsonInput.files[0];
+    if (!file) return;
+    const mode = importField.querySelector("input:checked").value;
+    try {
+      const imported = parseWorldImport(await file.text());
+      if (mode === "replace" && !window.confirm(DATA.text.replaceConfirm)) return;
+      world = importWorld(world, imported, mode);
+      const saved = persistWorld();
+      history.replaceState(null, "", "#/");
+      renderRoute();
+      if (saved) toast(DATA.text.importDone);
+    } catch (_) {
+      toast(DATA.text.importError);
+    } finally {
+      jsonInput.value = "";
+    }
+  });
+
+  let exportingJson = false;
+  document.getElementById("export-json").addEventListener("click", async () => {
+    if (exportingJson) return;
+    exportingJson = true;
+    const button = document.getElementById("export-json");
+    button.disabled = true;
+    button.textContent = DATA.text.jsonExporting;
+    try {
+      const sourceWorld = world;
+      const prepared = prepareWorldExport(sourceWorld);
+      const file = new File([prepared.text], prepared.filename, { type: DATA.backup.mime });
+      let shared = false;
+      let canShare = false;
+      try { canShare = Boolean(navigator.canShare && navigator.canShare({ files: [file] })); } catch (_) { /* download */ }
+      if (canShare && navigator.share) {
+        try {
+          await navigator.share({ files: [file] });
+          shared = true;
+        } catch (error) {
+          if (error.name === "AbortError") return;
+        }
+      }
+      if (!shared) {
+        const url = URL.createObjectURL(file);
+        const link = element("a");
+        link.href = url;
+        link.download = prepared.filename;
+        document.body.append(link);
+        try { link.click(); } finally {
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), DATA.backup.revokeDelay);
+        }
+      }
+      if (world === sourceWorld) {
+        world.ui.lastExportedAt = prepared.world.ui.lastExportedAt;
+        persistWorld();
+      }
+      renderBackup();
+    } catch (_) {
+      toast(DATA.text.jsonExportError);
+    } finally {
+      exportingJson = false;
+      button.disabled = false;
+      button.textContent = DATA.text.exportJson;
+    }
+  });
+
   const modeField = document.getElementById("list-mode");
   modeField.append(element("legend", "visually-hidden", DATA.text.listMode));
   const modes = element("div", "segments");
@@ -342,13 +502,13 @@ function calculateScore(card) {
   modeField.append(modes);
   modeField.addEventListener("change", event => {
     world.ui.listMode = event.target.value;
-    WORLD_STORAGE.save(world);
+    persistWorld();
     renderList();
   });
   function selectSeries(id) {
     if (!isValidSeriesId(id) || compareSeries(id, world.latestSeriesId) > 0) return;
     world.ui.seriesId = id;
-    WORLD_STORAGE.save(world);
+    persistWorld();
     renderList();
   }
   document.getElementById("series-select").addEventListener("change", event => selectSeries(event.target.value));
@@ -356,12 +516,12 @@ function calculateScore(card) {
   document.getElementById("next-series").addEventListener("click", () => selectSeries(shiftSeries(world.ui.seriesId, 1)));
   document.getElementById("add-series").addEventListener("click", () => {
     addWorldSeries(world);
-    WORLD_STORAGE.save(world);
+    persistWorld();
     renderList();
   });
   document.getElementById("delete-series").addEventListener("click", () => {
     if (!deleteLatestSeries(world)) return;
-    WORLD_STORAGE.save(world);
+    persistWorld();
     renderList();
   });
 
@@ -374,16 +534,17 @@ function calculateScore(card) {
   if (!DATA.listSorts.some(item => item.id === world.ui.sort)) world.ui.sort = DATA.worldUi.sort;
   sortSelect.addEventListener("change", () => {
     world.ui.sort = sortSelect.value;
-    WORLD_STORAGE.save(world);
+    persistWorld();
     renderList();
   });
   document.querySelectorAll("[data-add-player]").forEach(button => button.addEventListener("click", () => {
     const added = addWorldPlayer(world);
-    WORLD_STORAGE.save(world);
+    persistWorld();
     location.hash = "#/edit/" + added.id + "/" + world.ui.seriesId;
   }));
 
   function renderList() {
+    renderBackup();
     const select = document.getElementById("series-select");
     select.replaceChildren();
     for (const id of seriesIds(world.latestSeriesId)) {
@@ -433,8 +594,9 @@ function calculateScore(card) {
   function cardOverall(current) {
     const score = calculateScore(current);
     const overall = element("div", "list-overall");
-    overall.append(element("span", "list-overall-label", DATA.text.overall),
-      element("strong", "list-score", score.value.toLocaleString("ja-JP")), element("span", "list-rank", score.rank));
+    const value = element("div", "score-and-rank");
+    value.append(element("strong", "list-score", score.value.toLocaleString("ja-JP")), element("span", "list-rank", score.rank));
+    overall.append(element("span", "list-overall-label", DATA.text.overall), value);
     return overall;
   }
 
@@ -450,20 +612,28 @@ function calculateScore(card) {
     if (!points.length) return element("p", "no-cards", DATA.text.noCards);
     const config = DATA.historyGraph;
     const svg = svgElement("svg", { viewBox: `0 0 ${config.width} ${config.height}`, role: "img", "aria-label": DATA.text.scoreHistory, class: "history-graph" });
+    svg.style.fontFamily = DATA.fonts.page;
     const plotWidth = config.width - config.left - config.right;
     const plotHeight = config.height - config.top - config.bottom;
-    const maxScore = Math.ceil(points.reduce((max, point) => Math.max(max, point.value), DATA.score.min) / config.scoreStep) * config.scoreStep;
-    for (let tick = 0; tick <= config.ticks; tick++) {
-      const value = maxScore * tick / config.ticks;
-      const y = config.top + plotHeight * (1 - tick / config.ticks);
+    const scale = historyScale(points);
+    svg.dataset.min = scale.min;
+    svg.dataset.max = scale.max;
+    const scoreY = value => config.top + plotHeight * (1 - (value - scale.min) / (scale.max - scale.min));
+    scale.ticks.forEach(value => {
+      const y = scoreY(value);
       svg.append(svgElement("line", { x1: config.left, y1: y, x2: config.width - config.right, y2: y, stroke: DATA.colors.line }),
         svgElement("text", { x: config.left - config.valueLabelGap, y: y + config.valueBaseline, "text-anchor": "end", fill: DATA.colors.muted }, value.toLocaleString("ja-JP")));
-    }
+    });
+    scale.boundaries.forEach(rank => {
+      const y = scoreY(rank.min);
+      svg.append(svgElement("line", { class: "rank-boundary", "data-rank": rank.rank, "data-score": rank.min, x1: config.left, y1: y, x2: config.width - config.right, y2: y, stroke: DATA.colors.line, "stroke-dasharray": config.rankLineDash }),
+        svgElement("text", { class: "rank-boundary-label", x: config.width - config.right + config.rankLabelGap, y: y + config.valueBaseline, fill: DATA.colors.muted }, rank.rank));
+    });
     const first = seriesOrder(points[0].seriesId);
     const span = seriesOrder(points[points.length - 1].seriesId) - first;
     const coordinates = points.map(point => ({ ...point,
       x: config.left + plotWidth * (span === 0n ? 0.5 : Number((seriesOrder(point.seriesId) - first) * BigInt(config.precision) / span) / config.precision),
-      y: config.top + plotHeight * (1 - point.value / maxScore)
+      y: scoreY(point.value)
     }));
     svg.append(svgElement("polyline", { points: coordinates.map(point => `${point.x},${point.y}`).join(" "), fill: "none", stroke: DATA.colors.navy, "stroke-width": config.lineWidth }));
     const labelEvery = Math.max(1, Math.ceil((points.length - 1) / (config.maxLabels - 1)));
@@ -492,7 +662,7 @@ function calculateScore(card) {
     remove.addEventListener("click", () => {
       if (!window.confirm(message(DATA.text.deleteConfirm, { name: entity.name || DATA.text.anonymous }))) return;
       deleteWorldPlayer(world, entity.id);
-      WORLD_STORAGE.save(world);
+      persistWorld();
       history.replaceState(null, "", "#/");
       renderRoute();
     });
@@ -532,7 +702,7 @@ function calculateScore(card) {
         create.type = "button";
         create.addEventListener("click", () => {
           if (!createWorldCard(entity, seriesId)) return;
-          WORLD_STORAGE.save(world);
+          persistWorld();
           location.hash = "#/edit/" + entity.id + "/" + seriesId;
         });
         content.append(element("span", "timeline-series", seriesName(seriesId)), create);
@@ -727,8 +897,7 @@ function calculateScore(card) {
       if (!window.confirm(DATA.text.resetConfirm)) return;
       resetWorldCard(editingPlayer, editingSeriesId);
       player = { ...normalizeFixedFields(editingPlayer), ...editingPlayer.cards[editingSeriesId] };
-      commit();
-      toast(DATA.text.resetDone);
+      if (commit()) toast(DATA.text.resetDone);
     });
     form.append(reset);
     const copy = element("button", "button secondary copy-previous", DATA.text.copyPrevious);
@@ -739,8 +908,7 @@ function calculateScore(card) {
       if (!previous || !window.confirm(message(DATA.text.copyConfirm, { series: seriesName(previous) }))) return;
       if (!copyPreviousCard(editingPlayer, editingSeriesId)) return;
       player = { ...normalizeFixedFields(editingPlayer), ...normalizeCard(editingPlayer.cards[editingSeriesId]) };
-      commit();
-      toast(DATA.text.copyDone);
+      if (commit()) toast(DATA.text.copyDone);
     });
     form.append(copy);
     if (Object.keys(editingPlayer.cards).length > 1) {
@@ -749,7 +917,7 @@ function calculateScore(card) {
       remove.addEventListener("click", () => {
         if (!window.confirm(message(DATA.text.deleteCardConfirm, { series: seriesName(editingSeriesId) }))) return;
         if (!deleteWorldCard(editingPlayer, editingSeriesId)) return;
-        WORLD_STORAGE.save(world);
+        persistWorld();
         history.replaceState(null, "", "#/player/" + editingPlayer.id);
         renderRoute();
       });
@@ -894,7 +1062,7 @@ function calculateScore(card) {
     updateEditorBack();
     syncForm();
     renderCard();
-    WORLD_STORAGE.save(world);
+    return persistWorld();
   }
 
   function toast(text) {

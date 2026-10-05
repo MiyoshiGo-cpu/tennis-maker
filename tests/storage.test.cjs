@@ -332,3 +332,106 @@ test("選手詳細ルートはカード0枚でも開け、存在しない選手�
   assert.equal(h.run('resolvePlayerRoute(world,"#/player/p_valid1234").id'), "p_valid1234");
   for(const hash of ["#/player/p_missing1234", "#/player/p_valid1234/extra", "#/", "#/edit/p_valid1234/2017-1"]) assert.equal(h.run(`resolvePlayerRoute(world,${JSON.stringify(hash)})`), null);
 });
+
+test("JSON書き出しは整形済みUTF-8用テキストと日付付きファイル名を作り、元データを変えない", () => {
+  const h = harness();
+  h.run('var world=createEmptyWorld(); var entity=addWorldPlayer(world); entity.name="山田 太郎"; entity.cards["2019-2"]=normalizeCard({nickname:"日本語",gold:["precision"]}); world.latestSeriesId=world.ui.seriesId="2019-2"; world.ui.listMode="all"; world.ui.sort="name";');
+  const before = copy(h.run("world"));
+  const exported = copy(h.run('prepareWorldExport(world,new Date("2026-10-06T12:00:00Z"))'));
+  assert.equal(exported.filename, "tennis-maker_20261006.json");
+  assert.ok(exported.text.includes('\n  "version": 2') && exported.text.includes("山田 太郎"));
+  assert.deepEqual(JSON.parse(exported.text), exported.world);
+  assert.equal(exported.world.ui.lastExportedAt, "2026-10-06T12:00:00.000Z");
+  assert.deepEqual(copy(h.run("world")), before);
+});
+
+test("書き出し・全選手削除・置き換え読み込みで選手・全カード・UIが完全に復元する", () => {
+  const h = harness({ "tennisMaker.v1.player": "legacy backup" });
+  h.run('var world=createEmptyWorld(); addWorldPlayer(world); addWorldPlayer(world); world.players[0].name="一人目"; world.players[0].hand="left"; world.players[0].cards["2019-2"]=normalizeCard({stats:{control:99},gold:["precision"]}); world.latestSeriesId=world.ui.seriesId="2019-2"; world.ui.listMode="all"; world.ui.sort="created"; var backup=prepareWorldExport(world,new Date("2026-10-06T12:00:00Z")); world.ui.lastExportedAt=backup.world.ui.lastExportedAt; WORLD_STORAGE.save(world);');
+  const before = copy(h.run("world"));
+  h.run('world.players.map(p=>p.id).forEach(id=>deleteWorldPlayer(world,id)); WORLD_STORAGE.save(world); world=importWorld(world,parseWorldImport(backup.text),"replace"); WORLD_STORAGE.save(world);');
+  assert.deepEqual(copy(h.run("WORLD_STORAGE.load()")), before);
+  assert.equal(h.values.get("tennisMaker.v1.player"), "legacy backup");
+});
+
+test("同じJSONを追加で2回読み込んでもIDが重複せず、既存データとUIを保持する", () => {
+  const h = harness();
+  h.run('var world=normalizeWorld({players:[{id:"p_same12345",name:"既存",cards:{"2017-1":{}}}],ui:{seriesId:"2017-1",listMode:"all",sort:"name",lastExportedAt:"2026-10-01T12:00:00Z"}}); var incoming=parseWorldImport(JSON.stringify({version:2,latestSeriesId:"2020-2",players:[{id:"p_same12345",name:"追加",cards:{"2019-2":{stats:{power:99}}}}]}));');
+  const before = copy(h.run("world"));
+  h.run('world=importWorld(world,incoming,"append"); world=importWorld(world,incoming,"append"); WORLD_STORAGE.save(world);');
+  const result = copy(h.run("WORLD_STORAGE.load()"));
+  assert.equal(result.players.length, 3);
+  assert.equal(new Set(result.players.map(p => p.id)).size, 3);
+  assert.deepEqual(result.players[0], before.players[0]);
+  assert.deepEqual(result.ui, before.ui);
+  assert.equal(result.latestSeriesId, "2020-2");
+  for (const player of result.players.slice(1)) assert.equal(player.cards["2019-2"].stats.power, 99);
+  h.run('world.players[1].cards["2019-2"].stats.power=1;');
+  assert.equal(h.run('world.players[2].cards["2019-2"].stats.power'), 99);
+  assert.equal(h.run('incoming.players[0].cards["2019-2"].stats.power'), 99);
+});
+
+test("壊れたJSON・関係ないJSON・不正な構造は拒否し、保存データは一切変更しない", () => {
+  const h = harness({ "tennisMaker.v2.world": JSON.stringify({ version: 2, players: [] }) });
+  const before = [...h.values];
+  for (const text of ["{broken", "null", "[]", "42", "{}", '{"name":"別の文書"}', '{"version":1,"document":"別文書"}', '{"version":2,"players":"bad"}', '{"version":2,"players":[null]}', '{"version":2,"players":[{"cards":[]}]}', '{"version":2,"players":[],"ui":"bad"}']) {
+    assert.throws(() => h.run(`parseWorldImport(${JSON.stringify(text)})`));
+  }
+  assert.deepEqual([...h.values], before);
+  assert.equal(h.writes.length, 0);
+});
+
+test("v1 JSONを選手1人と開始シリーズのカードに分けて読み込む", () => {
+  const h = harness();
+  const legacy = {version:1,name:"旧選手",hand:"left",backhand:"one",nickname:"二つ名",surface:"grass",stats:{power:99},gold:["ironman"],plus:["rising","unknown"],shotSkills:{volley:"great"}};
+  const world = copy(h.run(`parseWorldImport(${JSON.stringify(JSON.stringify(legacy))})`));
+  assert.equal(world.players.length, 1);
+  assert.equal(world.players[0].name, "旧選手");
+  assert.equal(world.players[0].hand, "left");
+  assert.deepEqual(Object.keys(world.players[0].cards), ["2017-1"]);
+  const card = world.players[0].cards["2017-1"];
+  assert.equal(card.nickname, "二つ名");
+  assert.equal(card.stats.power, 99);
+  assert.deepEqual(card.plus, ["rising"]);
+  assert.equal(card.shotSkills.volley, "great");
+  assert.ok(!("name" in card));
+  assert.equal(h.writes.length, 0);
+});
+
+test("バックアップ案内は選手がいる場合だけ表示し、14日経過の境界を正しく扱う", () => {
+  const h = harness();
+  h.run('var world=createEmptyWorld();');
+  assert.equal(h.run("needsBackup(world)"), false);
+  h.run('addWorldPlayer(world);');
+  assert.equal(h.run("needsBackup(world)"), true);
+  h.run('world.ui.lastExportedAt="2026-10-01T12:00:00.000Z";');
+  assert.equal(h.run('needsBackup(world,Date.parse("2026-10-15T11:59:59.999Z"))'), false);
+  assert.equal(h.run('needsBackup(world,Date.parse("2026-10-15T12:00:00.000Z"))'), true);
+  assert.equal(h.run('needsBackup(world,Date.parse("2026-09-30T12:00:00.000Z"))'), false);
+});
+
+test("v1移行の保存失敗は通知し、選手データをメモリー上で保持する", () => {
+  const context = vm.createContext({localStorage:{getItem:key=>key==="tennisMaker.v1.player"?'{"version":1,"name":"保存失敗"}':null,setItem(){throw new Error("denied")}}});
+  vm.runInContext(dataSource+"\n"+storageSource,context);
+  assert.equal(vm.runInContext('var notified=0; var world=loadWorld(()=>notified++); world.players[0].name',context), "保存失敗");
+  assert.equal(vm.runInContext("notified",context), 1);
+});
+
+test("グラフの縦軸は最小・最大の前後を含み、同点・1枚でもゼロ幅にならない", () => {
+  const h = harness();
+  const close = copy(h.run('historyScale([{value:2830},{value:2840},{value:2850}])'));
+  assert.ok(close.min < 2830 && close.min > 0 && close.max > 2850 && close.max-close.min < 200);
+  for (const values of [[2000], [2000,2000], [40]]) {
+    const scale = copy(h.run(`historyScale(${JSON.stringify(values.map(value=>({value})))})`));
+    assert.ok(scale.min < values[0] && scale.max > values[0] && scale.max > scale.min);
+    assert.ok(scale.ticks.every(Number.isFinite));
+  }
+  assert.equal(h.run("historyScale([])"), null);
+});
+
+test("グラフのランク境界は5章のしきい値を使い、縦軸範囲内だけに出す", () => {
+  const h = harness();
+  const scale = copy(h.run('historyScale([{value:1900},{value:3250}])'));
+  assert.deepEqual(scale.boundaries.map(rank=>[rank.rank,rank.min]), [["A",3200],["B",2800],["C",2400],["D",2000],["E",1600]]);
+  assert.ok(scale.boundaries.every(rank=>rank.min >= scale.min && rank.min <= scale.max));
+});

@@ -4,7 +4,7 @@ body {
   margin: 0;
   color: var(--navy);
   background: var(--page);
-  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  font-family: var(--page-font, sans-serif);
   line-height: 1.6;
   -webkit-text-size-adjust: 100%;
 }
@@ -152,40 +152,46 @@ legend .common-fields { margin-left: 10px; }
 .list-mode { flex: 0 1 190px; }
 .list-controls .sort-control { margin: 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.series-management { margin-top: 28px; padding: 20px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
-.series-management h2 { font-size: 16px; margin: 0 0 14px; }
+.series-management, .data-management { margin-top: 28px; padding: 20px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
+.series-management h2, .data-management h2 { font-size: 16px; margin: 0 0 14px; }
+.data-management p { font-size: 12px; }
+.backup-warning { padding: 12px; border-radius: 8px; background: var(--badBg); color: var(--badText); }
+.import-mode { margin-top: 20px; }
+.import-mode .choice-content { padding: 6px; }
 .management-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .desktop-add { display: none; }
 .sort-control { display: flex; align-items: center; justify-content: flex-end; gap: 10px; font-size: 12px; margin-bottom: 14px; }
 .sort-control select { width: auto; min-width: 136px; min-height: 44px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--navy); background: var(--white); font: inherit; font-size: 16px; }
 .player-list { display: grid; gap: 10px; }
-.player-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 78px; align-items: center; gap: 10px; min-height: 88px; padding: 14px 20px 14px 12px; border: 1px solid var(--line); border-left: 5px solid var(--surface); border-radius: 10px; color: var(--navy); background: var(--white); text-decoration: none; min-width: 0; }
+.player-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px max-content; align-items: center; gap: 10px; min-height: 88px; padding: 14px 20px 14px 12px; border: 1px solid var(--line); border-left: 5px solid var(--surface); border-radius: 10px; color: var(--navy); background: var(--white); text-decoration: none; min-width: 0; }
 .missing-card { --surface: var(--line); color: var(--muted); }
 .list-identity { min-width: 0; overflow-wrap: anywhere; }
 .list-name { display: block; font-size: 18px; line-height: 1.5; }
 .list-nickname { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
 .list-icons { display: flex; gap: 8px; }
 .list-icons img { display: block; width: 28px; height: 28px; }
-.list-overall { display: grid; grid-template-columns: 1fr 22px; align-items: center; column-gap: 4px; }
-.list-overall > * { min-width: 0; }
-.list-overall-label { grid-column: 1 / -1; font-size: 10px; color: var(--muted); }
+.list-overall { display: flex; flex-direction: column; align-items: flex-start; }
+.score-and-rank { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.score-and-rank > * { flex: 0 0 auto; }
+.list-overall-label { font-size: 10px; color: var(--muted); }
 .list-score { font: 700 25px/1.2 "Barlow Condensed", sans-serif; }
-.list-rank { display: grid; place-items: center; border-radius: 5px; background: var(--ball); font-size: 13px; font-weight: 700; min-height: 24px; }
+.list-rank { display: grid; place-items: center; border-radius: 5px; background: var(--ball); font-size: 13px; font-weight: 700; min-height: 24px; min-width: 24px; padding: 0 5px; }
 .empty-players { padding: 40px 0; text-align: center; color: var(--muted); }
 .empty-players p { margin: 0 0 20px; }
-.detail-screen { max-width: 760px; margin: 0 auto; padding: 0 12px 48px; }
-.detail-identity { padding: 24px 4px 12px; overflow-wrap: anywhere; }
+.detail-screen { max-width: 1080px; margin: 0 auto; padding: 0 12px 48px; }
+.detail-identity { padding: 24px 0 12px; overflow-wrap: anywhere; }
 .detail-name { margin: 0; font-size: 26px; }
 .detail-identity p { margin: 6px 0; font-size: 14px; }
 .detail-meta { color: var(--muted); }
 .detail-panel { margin: 16px 0; padding: 18px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
 .detail-panel h3 { margin: 0 0 14px; font-size: 16px; }
 .history-graph { display: block; width: 100%; height: auto; }
-.history-graph text { font-size: 18px; font-family: inherit; }
+.history-graph text { font-size: 18px; }
+.history-graph, .history-graph text, .history-graph tspan { font-family: var(--page-font); }
 .no-cards, .single-card-hint { color: var(--muted); font-size: 12px; text-align: center; }
 .copy-previous { display: flex; margin: 16px auto 0; }
 .timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
-.timeline-card { display: grid; grid-template-columns: minmax(0, 1fr) 64px 78px; align-items: center; gap: 8px; min-height: 64px; padding: 10px; background: var(--paper); border-radius: 8px; color: var(--navy); text-decoration: none; }
+.timeline-card { display: grid; grid-template-columns: minmax(0, 1fr) 64px max-content; align-items: center; gap: 8px; min-height: 64px; padding: 10px; background: var(--paper); border-radius: 8px; color: var(--navy); text-decoration: none; }
 .timeline-series { font-size: 13px; overflow-wrap: anywhere; }
 .timeline-empty { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; min-height: 64px; }
 .mobile-actions.list-actions { grid-template-columns: 1fr; }
@@ -212,7 +218,7 @@ dialog p { font-size: 12px; }
   .editor-heading { padding: 0 24px 20px; }
   .list-screen { padding: 0 24px 48px; }
   .player-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-  .player-row { grid-template-columns: minmax(0, 1fr) 64px 90px; gap: 14px; padding: 18px 20px; }
+  .player-row { gap: 14px; padding: 18px 20px; }
   .detail-screen { padding: 0 24px 48px; }
   .list-name { font-size: 22px; }
   .list-score { font-size: 32px; }

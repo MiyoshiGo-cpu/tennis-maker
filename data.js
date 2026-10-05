@@ -15,9 +15,17 @@ const DATA = {
     { id: "score", name: "総合力順" }, { id: "name", name: "名前順" }, { id: "created", name: "登録順" }
   ],
   listModes: [{ id: "series", name: "このシリーズ" }, { id: "all", name: "全選手" }],
+  importModes: [{ id: "replace", name: "すべて置き換える" }, { id: "append", name: "選手を追加する" }],
+  backup: {
+    warningDays: 14, dayMs: 86400000, jsonIndent: 2, mime: "application/json",
+    accept: ".json,application/json", fileLabel: "tennis-maker_{year}{month}{day}.json",
+    dateLabel: "{year}/{month}/{day}", revokeDelay: 1000
+  },
+  fonts: { page: '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif' },
   historyGraph: {
-    width: 640, height: 270, left: 58, right: 22, top: 24, bottom: 62,
-    ticks: 4, scoreStep: 1000, radius: 5, lineWidth: 2,
+    width: 640, height: 270, left: 58, right: 38, top: 24, bottom: 62,
+    ticks: 4, paddingRatio: 0.15, minPadding: 20, tickSteps: [1, 2, 5, 10], radius: 5, lineWidth: 2,
+    rankLabelGap: 8, rankLineDash: "4 4",
     maxLabels: 4, minLabelGap: 80, precision: 10000,
     valueLabelGap: 8, valueBaseline: 4, seriesLabelGap: 20, labelLineHeight: 16, axisBottom: 4
   },
@@ -44,6 +52,13 @@ const DATA = {
     copyDone: "前のシリーズのカードをコピーしました。", deleteCard: "このカードを削除",
     deleteCardConfirm: "{series}のカードを削除します。よろしいですか？",
     singleCardHint: "選手ごと削除する場合は選手詳細から削除してください",
+    dataManagement: "データ管理", exportJson: "JSONで書き出し", importJson: "JSONを読み込む",
+    importMode: "読み込み方法", replaceConfirm: "今のデータをすべて置き換えます。よろしいですか？",
+    importDone: "JSONを読み込みました。", importError: "JSONを読み込めませんでした。ファイルの内容を確認してください。",
+    jsonExporting: "JSONを書き出し中…", jsonExportError: "JSONを書き出せませんでした。もう一度お試しください。",
+    lastExport: "最後の書き出し：{date}", neverExported: "まだ書き出していません",
+    backupWarning: "しばらく書き出していません。iPhoneでは保存データが消えることがあるので、書き出しておくと安心です。",
+    storageError: "保存できませんでした。JSONで書き出して、データを守ってください。",
     saving: "画像を作成中…", saveHint: "画像を長押しして保存してください",
     download: "PNGをダウンロード", close: "閉じる", imageAlt: "作成した選手カード",
     exportError: "画像を作成できませんでした。通信状況を確認して、もう一度お試しください。",

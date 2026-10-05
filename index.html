@@ -38,6 +38,17 @@
           <button type="button" id="delete-series" class="button secondary" data-text="deleteSeries"></button>
         </div>
       </section>
+      <section class="data-management" aria-labelledby="data-management-title">
+        <h2 id="data-management-title" data-text="dataManagement"></h2>
+        <p id="last-exported"></p>
+        <p id="backup-warning" class="backup-warning" data-text="backupWarning" hidden></p>
+        <div class="management-buttons">
+          <button type="button" id="export-json" class="button secondary" data-text="exportJson"></button>
+          <button type="button" id="import-json" class="button secondary" data-text="importJson"></button>
+        </div>
+        <fieldset id="import-mode" class="import-mode"></fieldset>
+        <input id="json-file" type="file" hidden>
+      </section>
     </section>
     <section id="player-screen" class="detail-screen" hidden></section>
     <section id="editor-screen" hidden>
