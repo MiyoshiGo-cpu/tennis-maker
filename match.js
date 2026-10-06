@@ -183,13 +183,23 @@
     });
     const result = { winner: null, sets: [], scoreText: "", points: [], log: [], stats: { a: initialStats(), b: initialStats() }, seed };
     let tiebreakServer = null;
+    let previousTemplate = null, deuces = 0;
     const line = (type, text, pointIndex) => result.log.push({ type, text, pointIndex });
     while (!result.winner) {
       const server = state.server, receiver = other(server), index = result.points.length;
       const pressureByPlayer = pressures(state), pressure = [...new Set(keys.flatMap(key => pressureByPlayer[key]))];
-      keys.forEach(key => pressureByPlayer[key].forEach(id => {
-        if (id !== "tiebreak") line("pressure", formatText(config.lines.pressure, { name: names[key], pressure: config.pressure[id] }), index);
-      }));
+      const priority = config.pressurePriority.find(id => pressure.includes(id));
+      if (priority) {
+        const key = keys.find(key => pressureByPlayer[key].includes(priority));
+        line("pressure", formatText(config.lines.pressure, { name: names[key], pressure: config.pressure[priority] }), index);
+      } else if (!state.tiebreak && keys.every(key => state.points[key] >= rules.gamePoints - 1)) {
+        if (state.points.a === state.points.b) {
+          line("score", deuces++ ? config.lines.deuceAgain : config.lines.deuce, index);
+        } else {
+          const key = state.points.a > state.points.b ? "a" : "b";
+          line("score", formatText(config.lines.advantage, { name: names[key] }), index);
+        }
+      }
       const effective = Object.fromEntries(keys.map(key => [key, effectiveStats(entries[key], entries[other(key)], state, key, pressure)]));
       const chances = pointChances(entries[server], entries[receiver], effective[server], effective[receiver], surface, pressure);
       const firstIn = rng() < chances.firstIn;
@@ -199,8 +209,9 @@
       const shot = selectShot(finish.kind, shotEntry, rng);
       const shotName = data.shotSkills.items.find(item => item.id === shot)?.name || data.serves.find(item => item.id === shot)?.name;
       const serveName = data.serves.find(item => item.id === (entries[server].card.serve || data.initial.serve)).name;
-      const templates = config.commentary[finish.kind];
-      line("point", formatText(templates[Math.floor(rng() * templates.length)], { name: names[winner], opponent: names[loser], shot: shotName, serve: serveName }), index);
+      const templates = config.commentary[finish.kind].filter(template => template !== previousTemplate);
+      previousTemplate = templates[Math.floor(rng() * templates.length)];
+      line("point", formatText(previousTemplate, { name: names[winner], opponent: names[loser], shot: shotName, serve: serveName }), index);
       const ss = result.stats[server], rs = result.stats[receiver];
       ss.servicePoints++;
       if (firstIn) ss.firstServesIn++; else ss.secondServes++;
@@ -221,14 +232,18 @@
         state.games[winner]++;
         state.lastGameWinner = winner;
         if (breakPoint && winner === receiver) rs.breakPointsWon++;
-        line("game", formatText(config.lines.game, { name: names[winner], ...state.games }), index);
+        const leader = state.games.a > state.games.b ? "a" : "b";
+        const score = state.games.a === state.games.b
+          ? formatText(config.lines.gameTie, { games: state.games.a })
+          : formatText(config.lines.gameLead, { name: names[leader], lead: state.games[leader], behind: state.games[other(leader)] });
+        line("game", formatText(config.lines.game, { name: names[winner], score }), index);
         setEnd = wasTiebreak || (state.games[winner] >= rules.setGames && state.games[winner] - state.games[loser] >= rules.lead);
         if (setEnd) {
           const set = { ...state.games };
           if (wasTiebreak) set.tiebreak = { ...state.points };
           result.sets.push(set);
           state.setsWon[winner]++;
-          line("set", formatText(config.lines.set, { name: names[winner], set: state.setNumber, ...set }), index);
+          line("set", formatText(config.lines.set, { name: names[winner], set: state.setNumber, won: set[winner], lost: set[loser] }), index);
           if (state.setsWon[winner] > format / rules.lead) {
             result.winner = winner;
             line("match", formatText(config.lines.match, { name: names[winner] }), index);
@@ -242,6 +257,7 @@
         score: { sets: { ...state.setsWon }, games: { ...state.games }, points: { ...state.points },
           pointText: pointLabels(gameEnd && !wasTiebreak ? { a: 0, b: 0 } : state.points, wasTiebreak) } });
       if (gameEnd) {
+        deuces = 0;
         state.points = { a: 0, b: 0 };
         state.server = wasTiebreak ? other(tiebreakServer) : other(server);
         if (setEnd) { state.setNumber++; state.gameNumber = 1; state.games = { a: 0, b: 0 }; state.tiebreak = false; }

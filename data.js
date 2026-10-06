@@ -308,6 +308,7 @@ const DATA = {
       error: { base: 2, stat: "speed", scale: 0.008, styles: { defensive: 2, trickster: 0.5 } }
     },
     pressure: { break: "ブレークポイント", set: "セットポイント", match: "マッチポイント", tiebreak: "タイブレーク" },
+    pressurePriority: ["match", "set", "break"],
     commentary: {
       ace: ["{name}、{serve}でエース！", "{name}の{serve}、相手は動けない！", "サービスエース！ {name}が突き放す。"],
       doubleFault: ["{opponent}、痛いダブルフォールト。", "2ndサーブも外れた。{opponent}のダブルフォールト。", "{opponent}のサーブがネット。ダブルフォールトだ。"],
@@ -318,7 +319,12 @@ const DATA = {
       net: ["{name}、ネットで{shot}を決めた！", "{name}の{shot}！ 前で仕留める。", "ネットを取った{name}、{shot}でポイント！"],
       pass: ["{name}、{shot}でネットを破る！", "{name}の{shot}が{opponent}を抜いた！", "{name}、見事な{shot}！ ネットの相手をかわした。"]
     },
-    lines: { pressure: "{name}、{pressure}。", game: "ゲーム {name}。{a}-{b}", set: "第{set}セットは {name}が {a}-{b} で獲得。", match: "ゲームセット！ {name}の勝利" },
+    lines: {
+      pressure: "{name}、{pressure}。", game: "ゲーム {name}。{score}",
+      gameLead: "{name}が {lead}-{behind} とリード", gameTie: "{games}-{games} のタイ",
+      set: "第{set}セットは {name}が {won}-{lost} で獲得。", match: "ゲームセット！ {name}の勝利",
+      deuce: "デュース！", deuceAgain: "再びデュース", advantage: "アドバンテージ {name}"
+    },
     errors: { options: "対戦する2枚のカードと有効な試合設定を指定してください。", seed: "seed は有限の数値で指定してください。" }
   },
   score: {

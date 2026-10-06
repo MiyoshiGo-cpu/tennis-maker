@@ -113,6 +113,66 @@ test("結果PNGのファイル名は2人の名前を使い、禁止文字と末�
   }
 });
 
+test("固定seedの実況は連続するひな形を避け、優先ポイント・デュース・リード側とセット勝者のスコアを表示する", () => {
+  const text = (template, values) => template.replace(/\{(\w+)\}/g, (_, key) => values[key] ?? "");
+  const priorityOrder=["match","set","break"];
+  assert.deepEqual(DATA.match.pressurePriority,priorityOrder);
+  const covered = new Set();
+  for (const [format, seed] of [[1,9],[3,3],[3,4],[3,60],[5,27]]) {
+    const a=entry(),b=entry();a.player.name="山田 太郎";b.player.name="佐藤 健";
+    const result=TennisMatch.simulate({a,b,format,firstServer:"a",seed});
+    const names={a:a.player.name,b:b.player.name},entries={a,b};
+    let previousTemplate=null,deuces=0;
+    result.log.forEach((line,index)=>{if(index)assert.notEqual(line.text,result.log[index-1].text);});
+    for (let index=0;index<result.points.length;index++) {
+      const point=result.points[index],lines=result.log.filter(line=>line.pointIndex===index);
+      const before={...point.score.points};before[point.winner]--;
+      const pressure=lines.filter(line=>line.type==="pressure"),score=lines.filter(line=>line.type==="score");
+      const priority=priorityOrder.find(id=>point.pressure.includes(id));
+      assert.equal(pressure.length,priority?1:0);
+      if(priority){
+        covered.add(priority);
+        const key=before.a>before.b?"a":"b";
+        assert.equal(pressure[0].text,text(DATA.match.lines.pressure,{name:names[key],pressure:DATA.match.pressure[priority]}));
+        assert.ok(lines.indexOf(pressure[0])<lines.findIndex(line=>line.type==="point"));
+        assert.equal(score.length,0);
+      }
+      if(!point.tiebreak&&Object.values(before).every(value=>value>=DATA.match.rules.gamePoints-1)) {
+        if(before.a===before.b){
+          assert.equal(score.length,1);
+          assert.equal(score[0].text,deuces++?DATA.match.lines.deuceAgain:DATA.match.lines.deuce);
+          covered.add(deuces===1?"deuce":"deuceAgain");
+        } else if(!priority){
+          assert.equal(score.length,1);
+          assert.equal(score[0].text,text(DATA.match.lines.advantage,{name:names[before.a>before.b?"a":"b"]}));
+          covered.add("advantage");
+        } else covered.add("suppressedAdvantage");
+      } else assert.equal(score.length,0);
+      const loser=opposite(point.winner),serve=entries[point.server].card.serve;
+      const shot=DATA.shotSkills.items.find(item=>item.id===point.shot)?.name||DATA.serves.find(item=>item.id===point.shot)?.name;
+      const values={name:names[point.winner],opponent:names[loser],shot,serve:DATA.serves.find(item=>item.id===serve).name};
+      const actual=lines.find(line=>line.type==="point").text;
+      const template=DATA.match.commentary[point.kind].find(template=>text(template,values)===actual);
+      assert.ok(template);assert.notEqual(template,previousTemplate);previousTemplate=template;
+      if(point.gameEnd){
+        const games=point.score.games,leader=games.a>games.b?"a":"b";
+        const tied=games.a===games.b;
+        covered.add(tied?"gameTie":"gameLead"+leader);
+        if(!tied&&leader!==point.winner)covered.add("trailingGameWinner");
+        const count=tied?text(DATA.match.lines.gameTie,{games:games.a}):text(DATA.match.lines.gameLead,{name:names[leader],lead:games[leader],behind:games[opposite(leader)]});
+        assert.equal(lines.find(line=>line.type==="game").text,text(DATA.match.lines.game,{name:names[point.winner],score:count}));
+        deuces=0;
+      }
+      if(point.setEnd){
+        covered.add("setWinner"+point.winner);
+        assert.ok(point.score.games[point.winner]>point.score.games[loser]);
+        assert.equal(lines.find(line=>line.type==="set").text,text(DATA.match.lines.set,{name:names[point.winner],set:point.set,won:point.score.games[point.winner],lost:point.score.games[loser]}));
+      }
+    }
+  }
+  for(const condition of ["match","set","break","deuce","deuceAgain","advantage","suppressedAdvantage","gameTie","gameLeada","gameLeadb","trailingGameWinner","setWinnera","setWinnerb"])assert.ok(covered.has(condition),condition);
+});
+
 test("タグは総合力400差・6-0・タイブレーク2回・エース10本・ノーブレークを優先順で最大2つにする", () => {
   const options={a:entry(50),b:entry(60),format:5};
   const result=TennisMatch.simulate({...options,seed:2});
