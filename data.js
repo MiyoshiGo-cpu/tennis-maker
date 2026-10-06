@@ -199,6 +199,32 @@ const DATA = {
   ],
   exclusive: [["fast_start", "slow_starter"], ["tenacious", "quitter"]],
   match: {
+    themes: {
+      default: {
+        "bg-top": "#0B1530", "bg-bottom": "#16306E", main: "#1F4FBF", accent: "#FFD23F",
+        text: "#FFFFFF", muted: "rgba(255,255,255,0.55)", light: "rgba(255,255,255,0.10)",
+        glow: "rgba(255,210,63,0.45)", panel: "rgba(11,21,48,0.65)", "winner-ink": "#14213D"
+      }
+    },
+    presentation: {
+      winner: "WINNER", versus: "VS", scoreboard: "スコアボード", setLabel: "第{set}セット",
+      highlights: "試合の山場", statComparison: "{name}：{a} 対 {b}",
+      limits: { tags: 2, highlights: 3, upset: 400, aceTag: 10, tiebreakTag: 2, deuce: 3, setAces: 4, dominantGames: 1 },
+      headlines: {
+        finalTiebreak: "最終セットタイブレークの死闘を制す", savedMatchPoint: "マッチポイントをしのいで大逆転",
+        comeback: "逆転勝利", fullSets: "フルセットの激闘を制す", dominant: "完勝", straight: "ストレート勝ち", victory: "勝利"
+      },
+      tags: { upset: "大金星", bagel: "ベーグル", tiebreaks: "タイブレーク{count}回", aces: "エース{count}本", noBreak: "ノーブレーク" },
+      moments: {
+        matchPoint: "第{set}セット {a}-{b}、{name}がマッチポイントをしのぐ",
+        break: "第{set}セット第{game}ゲーム、{name}が決定的なブレーク",
+        deuce: "第{set}セット第{game}ゲーム、デュース{count}回の攻防を{name}が制す",
+        tiebreak: "第{set}セットのタイブレークを{name}が {won}-{lost} で奪う",
+        aces: "第{set}セット、{name}がエース{count}本"
+      },
+      animation: { cards: 0.6, versus: 0.6, decision: 1.2, badge: 1.5, headline: 1.8, column: 0.25, reveal: 0.3, section: 0.15, confetti: 2, particles: 32 },
+      particles: { spread: 37, drift: 20, driftStep: 8, variations: 7, stagger: 0.04, groups: 4 }
+    },
     ui: {
       setup: "対戦設定", result: "試合結果", player: "選手", series: "シリーズ", format: "試合形式",
       surface: "サーフェス", firstServer: "最初のサーバー", start: "試合開始", choosePlayer: "選手を選択",
@@ -211,12 +237,12 @@ const DATA = {
       percentDigits: 1, fraction: "{won}/{total}",
       statRows: [
         { name: "獲得ポイント合計", field: "pointsWon" }, { name: "エース", field: "aces" },
-        { name: "ダブルフォールト", field: "doubleFaults" },
+        { name: "ダブルフォールト", field: "doubleFaults", lowerBetter: true },
         { name: "1stサーブの確率", field: "firstServeRate", percent: true, total: "servicePoints" },
         { name: "1stサーブでのポイント獲得率", field: "firstServeWinRate", percent: true, total: "firstServesIn" },
         { name: "2ndサーブでのポイント獲得率", field: "secondServeWinRate", percent: true, total: "secondServes" },
         { name: "ブレークポイント（獲得／機会）", field: "breakPointsWon", total: "breakPointOpportunities" },
-        { name: "ウィナー", field: "winners" }, { name: "ミス", field: "errors" },
+        { name: "ウィナー", field: "winners" }, { name: "ミス", field: "errors", lowerBetter: true },
         { name: "ネットでのポイント（獲得／回数）", field: "netPointsWon", total: "netPoints" }
       ]
     },

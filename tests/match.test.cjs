@@ -26,6 +26,98 @@ function chances(a, b, context = state(), pressure = [], net = false) {
   return TennisMatch.pointChances(a, b, ea, eb, context.surface, pressure, net);
 }
 
+const presentationContext = vm.createContext({});
+const appSource = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../data.js"), "utf8") + "\n" + appSource.slice(0, appSource.indexOf("(function () {")), presentationContext);
+function presentation(options, result) {
+  presentationContext.options = options;
+  presentationContext.result = result;
+  return copy(vm.runInContext("matchPresentation(options,result)", presentationContext));
+}
+
+test("結果見出しは固定seedの逆転・フルセット・ストレート・最終タイブレークと優先順に一致する", () => {
+  const cases = [[1,"comeback","6-1 5-7 1-6"], [2,"straight","6-3 7-5"], [13,"fullSets","6-7(3) 6-2 1-6"],
+    [3,"finalTiebreak","6-2 7-6(5)"], [60,"savedMatchPoint","6-7(8) 7-6(4) 6-3"]];
+  for (const [seed, headline, score] of cases) {
+    const options = { a: entry(), b: entry(), format:3, surface:"hard", firstServer:"a", seed };
+    const result = TennisMatch.simulate(options), before = copy({options,result});
+    assert.equal(result.scoreText, score);
+    assert.equal(presentation(options,result).headline, headline);
+    assert.deepEqual({options,result}, before);
+  }
+  const options = { a:entry(), b:entry(), format:1, firstServer:"a", seed:2 };
+  assert.equal(presentation(options,TennisMatch.simulate(options)).headline, "victory");
+  options.a=entry(99);options.b=entry(1);
+  assert.equal(presentation(options,TennisMatch.simulate(options)).headline, "dominant");
+});
+
+test("タグは総合力400差・6-0・タイブレーク2回・エース10本・ノーブレークを優先順で最大2つにする", () => {
+  const options={a:entry(50),b:entry(60),format:5};
+  const result=TennisMatch.simulate({...options,seed:2});
+  result.winner="a";result.points=[];
+  result.sets=[{a:6,b:0},{a:7,b:6,tiebreak:{a:8,b:6}},{a:7,b:6,tiebreak:{a:7,b:5}}];
+  result.stats.a.aces=10;result.stats.b.breakPointsWon=0;
+  assert.deepEqual(presentation(options,result).tags.map(item=>item.type), ["upset","bagel"]);
+  options.b=entry(59);
+  assert.deepEqual(presentation(options,result).tags.map(item=>item.type), ["bagel","tiebreaks"]);
+  result.sets.shift();
+  assert.deepEqual(presentation(options,result).tags, [{type:"tiebreaks",count:2},{type:"aces",count:10}]);
+  result.stats.a.aces=9;
+  assert.deepEqual(presentation(options,result).tags.map(item=>item.type), ["tiebreaks","noBreak"]);
+  result.sets.pop();
+  assert.deepEqual(presentation(options,result).tags, [{type:"noBreak"}]);
+  result.stats.b.breakPointsWon=1;
+  assert.deepEqual(presentation(options,result).tags, []);
+});
+
+test("山場はしのいだ相手のマッチポイント・最後のブレーク・最多デュースを記録から選ぶ", () => {
+  const options={a:entry(),b:entry(),format:3,firstServer:"a",seed:60};
+  const result=TennisMatch.simulate(options);
+  const moments=presentation(options,result).moments;
+  assert.deepEqual(moments.map(item=>item.type), ["matchPoint","break","deuce"]);
+  assert.deepEqual([moments[0].set,moments[0].a,moments[0].b], [2,4,5]);
+  const finalBreak=result.points.filter(point=>point.set===result.sets.length&&point.gameEnd&&!point.tiebreak&&point.winner!==point.server).pop();
+  assert.equal(moments[1].game, finalBreak.game);
+  const deuceGames=new Map();
+  result.points.filter(point=>!point.tiebreak&&point.score.points.a===point.score.points.b&&point.score.points.a>=3).forEach(point=>{
+    const key=point.set+"/"+point.game;deuceGames.set(key,(deuceGames.get(key)||0)+1);
+  });
+  assert.equal(moments[2].count,Math.max(...deuceGames.values()));
+  // combined pressureは勝者自身のマッチポイントも含むため、それを「しのいだ」と数えない。
+  const straight=TennisMatch.simulate({...options,seed:2});
+  assert.ok(straight.points.some(point=>point.pressure.includes("match")&&point.winner===straight.winner));
+  assert.equal(presentation(options,straight).moments.some(item=>item.type==="matchPoint"),false);
+});
+
+test("タイブレークの山場は実際のポイント数を使い、エースはセットごとに数え、場面がなければ空にする", () => {
+  const options={a:entry(),b:entry(),format:3,firstServer:"a",seed:3};
+  const result=TennisMatch.simulate(options);
+  assert.deepEqual(presentation(options,result).moments.find(item=>item.type==="tiebreak"),{type:"tiebreak",set:2,name:"試験選手",won:7,lost:5});
+  const aceResult=TennisMatch.simulate({...options,seed:1});
+  const aceMoment=presentation(options,aceResult).moments.find(item=>item.type==="aces");
+  assert.equal(aceMoment.count,4);
+  assert.equal(aceResult.points.filter(point=>point.set===aceMoment.set&&point.kind==="ace"&&point.winner==="a").length,4);
+  result.points=[];result.sets=[{a:6,b:4}];
+  assert.deepEqual(presentation(options,result).moments,[]);
+});
+
+test("綱引きバーは数値の比率・逆向き評価・同値を扱い、両者ゼロは表示しない", () => {
+  const options={a:entry(),b:entry(),format:3,seed:2},result=TennisMatch.simulate(options);
+  result.stats.a.aces=6;result.stats.b.aces=4;
+  result.stats.a.doubleFaults=1;result.stats.b.doubleFaults=3;
+  result.stats.a.errors=20;result.stats.b.errors=10;
+  result.stats.a.netPointsWon=result.stats.b.netPointsWon=0;
+  result.stats.a.winners=result.stats.b.winners=10;
+  const stats=presentation(options,result).stats;
+  const ace=stats.find(item=>item.field==="aces");
+  assert.equal(ace.share,0.6);assert.equal(ace.better,"a");
+  assert.equal(stats.find(item=>item.field==="doubleFaults").better,"a");
+  assert.equal(stats.find(item=>item.field==="errors").better,"b");
+  assert.equal(stats.find(item=>item.field==="winners").better,null);
+  assert.equal(stats.some(item=>item.field==="netPointsWon"),false);
+  assert.ok(stats.every(item=>Number.isFinite(item.share)&&item.share>=0&&item.share<=1));
+});
+
 test("Node とブラウザの両方で読み込め、DOM・保存処理に依存しない", () => {
   const context = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(__dirname, "../data.js"), "utf8"), context);

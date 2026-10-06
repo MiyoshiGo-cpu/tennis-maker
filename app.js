@@ -420,6 +420,73 @@ function calculateScore(card) {
   return { value, rank: DATA.score.ranks.find(rank => value >= rank.min).rank };
 }
 
+// 表示用の判定もDOMから分離し、seedを固定した試合結果で検証する。
+function matchPresentation(options, result) {
+  const config = DATA.match.presentation, rules = DATA.match.rules;
+  const winner = result.winner, loser = winner === "a" ? "b" : "a";
+  const format = options.format || rules.initialFormat;
+  const name = side => options[side].player.name || DATA.text.anonymous;
+  const saved = [], breaks = [], games = new Map(), aces = new Map();
+  let before = { sets: { a: 0, b: 0 }, games: { a: 0, b: 0 }, points: { a: 0, b: 0 } };
+  for (const point of result.points) {
+    const gameKey = point.set + "/" + point.game;
+    if (!games.has(gameKey)) games.set(gameKey, { set: point.set, game: point.game, count: 0, winner: null });
+    const game = games.get(gameKey);
+    const target = point.tiebreak ? rules.tiebreakPoints : rules.gamePoints;
+    const opponentMatchPoint = before.points[loser] + 1 >= target
+      && before.points[loser] + 1 - before.points[winner] >= rules.lead
+      && (point.tiebreak || (before.games[loser] + 1 >= rules.setGames && before.games[loser] + 1 - before.games[winner] >= rules.lead))
+      && before.sets[loser] + 1 > format / rules.lead;
+    if (point.winner === winner && opponentMatchPoint && !saved.some(item => item.key === gameKey)) {
+      saved.push({ type: "matchPoint", key: gameKey, set: point.set, a: before.games[winner], b: before.games[loser], name: name(winner) });
+    }
+    if (!point.tiebreak && point.score.points.a === point.score.points.b && point.score.points.a >= rules.gamePoints - 1) game.count++;
+    if (point.gameEnd) {
+      game.winner = point.winner;
+      if (!point.tiebreak && point.server !== point.winner) breaks.push({ type: "break", set: point.set, game: point.game, name: name(point.winner) });
+    }
+    if (point.kind === "ace") {
+      const key = point.set + "/" + point.winner;
+      if (!aces.has(key)) aces.set(key, { type: "aces", set: point.set, name: name(point.winner), count: 0 });
+      aces.get(key).count++;
+    }
+    before = {
+      sets: point.score.sets,
+      games: point.setEnd ? { a: 0, b: 0 } : point.score.games,
+      points: point.gameEnd ? { a: 0, b: 0 } : point.score.points
+    };
+  }
+  const first = result.sets[0], last = result.sets[result.sets.length - 1];
+  const headline = last.tiebreak ? "finalTiebreak" : saved.length ? "savedMatchPoint"
+    : first[winner] < first[loser] ? "comeback" : format > 1 && result.sets.length === format ? "fullSets"
+      : result.sets.every(set => set[loser] <= config.limits.dominantGames) ? "dominant" : format === 1 ? "victory" : "straight";
+  const tiebreaks = result.sets.filter(set => set.tiebreak).length;
+  const scores = Object.fromEntries(["a", "b"].map(side => [side, calculateScore(normalizeCard(options[side].card)).value]));
+  const tags = [];
+  if (scores[loser] - scores[winner] >= config.limits.upset) tags.push({ type: "upset" });
+  if (result.sets.some(set => Math.max(set.a, set.b) === rules.setGames && Math.min(set.a, set.b) === 0)) tags.push({ type: "bagel" });
+  if (tiebreaks >= config.limits.tiebreakTag) tags.push({ type: "tiebreaks", count: tiebreaks });
+  if (result.stats[winner].aces >= config.limits.aceTag) tags.push({ type: "aces", count: result.stats[winner].aces });
+  if (result.stats[loser].breakPointsWon === 0) tags.push({ type: "noBreak" });
+  const moments = [...saved];
+  const lastBreak = breaks.filter(item => item.set === result.sets.length).pop();
+  if (lastBreak) moments.push(lastBreak);
+  const deuce = Array.from(games.values()).filter(game => game.count >= config.limits.deuce).sort((a, b) => b.count - a.count)[0];
+  if (deuce) moments.push({ ...deuce, type: "deuce", name: name(deuce.winner) });
+  result.sets.forEach((set, index) => {
+    if (!set.tiebreak) return;
+    const side = set.a > set.b ? "a" : "b", other = side === "a" ? "b" : "a";
+    moments.push({ type: "tiebreak", set: index + 1, name: name(side), won: set.tiebreak[side], lost: set.tiebreak[other] });
+  });
+  moments.push(...Array.from(aces.values()).filter(item => item.count >= config.limits.setAces));
+  const stats = DATA.match.ui.statRows.flatMap(item => {
+    const a = result.stats.a[item.field], b = result.stats.b[item.field];
+    if (a === 0 && b === 0) return [];
+    return [{ ...item, a, b, share: a / (a + b), better: a === b ? null : (item.lowerBetter ? a < b : a > b) ? "a" : "b" }];
+  });
+  return { headline, tags: tags.slice(0, config.limits.tags), moments: moments.slice(0, config.limits.highlights), stats };
+}
+
 (function () {
   let toastTimer;
   let world = WORLD_STORAGE.load(() => toast(DATA.text.storageError));
@@ -881,58 +948,159 @@ function calculateScore(card) {
   function renderMatchResult() {
     const screen = document.getElementById("match-result-screen");
     screen.replaceChildren();
+    screen.classList.remove("result-final");
+    screen.onanimationend = null;
     const ui = DATA.match.ui;
+    const config = DATA.match.presentation;
+    const timing = config.animation;
     const { options, result } = matchRun;
-    const winner = options[result.winner];
-    const heading = element("header", "match-result-heading");
-    heading.append(element("h2", "", ui.result),
-      element("p", "match-winner", message(ui.winner, { name: winner.player.name || DATA.text.anonymous })),
-      element("p", "match-meta", message(ui.winnerSeries, { side: ui.sides.find(item => item.id === result.winner).name, series: seriesName(winner.seriesId) })));
-    const score = element("p", "match-score");
-    result.scoreText.split(" ").forEach((set, index) => {
-      if (index) score.append(document.createTextNode(" "));
-      score.append(element("span", "", set));
-    });
-    heading.append(score, element("p", "match-meta", [DATA.basic.surface.find(item => item.id === options.surface).name,
-      ui.formats.find(item => item.id === options.format).name].join(DATA.text.separator)));
-    const table = element("table", "match-stats");
-    table.append(element("caption", "", ui.stats));
-    const head = element("thead");
-    const titles = element("tr");
-    titles.append(element("th", "", ui.stats));
+    const presentation = matchPresentation(options, result);
+    Object.entries(DATA.match.themes.default).forEach(([key, value]) => document.body.style.setProperty("--result-" + key, value));
+    Object.entries(timing).forEach(([key, value]) => screen.style.setProperty("--time-" + key, value + "s"));
+    const reveal = (node, delay) => {
+      node.classList.add("result-reveal");
+      node.style.setProperty("--reveal-delay", delay + "s");
+      return node;
+    };
+    const contenders = element("div", "result-contenders");
+    contenders.setAttribute("aria-label", ui.result);
     ui.sides.forEach(({ id, name }) => {
-      const cell = element("th");
-      cell.scope = "col";
-      cell.append(element("span", "match-stat-side", name), element("strong", "", options[id].player.name || DATA.text.anonymous),
-        element("span", "match-stat-series", seriesName(options[id].seriesId)));
-      titles.append(cell);
+      const entry = options[id], current = entry.card;
+      const contender = element("div", "result-contender side-" + id);
+      const mini = element("article", "result-mini-card " + (id === result.winner ? "is-winner" : "is-loser"));
+      mini.dataset.side = id;
+      const surface = DATA.basic.surface.find(item => item.id === current.surface);
+      mini.style.setProperty("--surface", surface.color);
+      mini.style.setProperty("--outer", surface.outer || surface.color);
+      mini.style.setProperty("--stripe", surface.stripe || surface.color);
+      const court = element("div", "result-mini-court" + (surface.stripe ? " striped" : ""));
+      const pose = DATA.poses.find(item => item.id === (current.pose || DATA.initial.pose));
+      if (pose.file) {
+        const silhouette = element("div", "result-mini-pose");
+        silhouette.append(poseGraphic(pose, entry.player.hand));
+        court.append(silhouette);
+      }
+      const identity = element("div", "result-mini-identity");
+      identity.append(element("span", "result-mini-side", name), element("span", "result-mini-series", seriesName(entry.seriesId)));
+      const caption = element("div", "result-mini-caption");
+      if (current.nickname) caption.append(element("p", "result-mini-nickname", current.nickname));
+      caption.append(element("h2", "result-mini-name", entry.player.name || DATA.text.anonymous), cardOverall(current));
+      court.append(identity, caption);
+      mini.append(court);
+      if (id === result.winner) mini.append(element("span", "result-winner-badge", config.winner));
+      contender.append(mini);
+      contenders.append(contender);
+      if (id === "a") contenders.append(element("strong", "result-versus", config.versus));
     });
-    head.append(titles);
+    const heading = reveal(element("header", "result-heading"), timing.headline);
+    heading.dataset.headline = presentation.headline;
+    heading.append(element("p", "result-victory", message(ui.winner, { name: options[result.winner].player.name || DATA.text.anonymous })),
+      element("h2", "result-headline", config.headlines[presentation.headline]));
+    const tags = element("div", "result-tags");
+    presentation.tags.forEach(item => tags.append(element("span", "result-tag", message(config.tags[item.type], item))));
+    heading.append(tags);
+    const board = element("table", "result-scoreboard");
+    board.setAttribute("aria-label", config.scoreboard);
     const body = element("tbody");
-    ui.statRows.forEach(item => {
+    ui.sides.forEach(({ id }) => {
       const row = element("tr");
-      const label = element("th", "", item.name);
+      if (id === result.winner) row.classList.add("scoreboard-winner");
+      const label = element("th", "", options[id].player.name || DATA.text.anonymous);
       label.scope = "row";
       row.append(label);
-      ui.sides.forEach(({ id }) => {
-        const stats = result.stats[id];
-        let value = stats[item.field].toLocaleString("ja-JP");
-        if (item.percent) value = stats[item.total] ? stats[item.field].toLocaleString("ja-JP", { style: "percent", minimumFractionDigits: ui.percentDigits, maximumFractionDigits: ui.percentDigits }) : DATA.text.missingScore;
-        else if (item.total) value = message(ui.fraction, { won: value, total: stats[item.total].toLocaleString("ja-JP") });
-        row.append(element("td", "", value));
+      result.sets.forEach((set, index) => {
+        const other = id === "a" ? "b" : "a";
+        const cell = reveal(element("td", "result-set " + (set[id] > set[other] ? "set-won" : "set-lost")), timing.headline + (index + 1) * timing.column);
+        cell.dataset.set = index + 1;
+        cell.append(element("span", "visually-hidden", message(config.setLabel, { set: index + 1 }) + DATA.text.separator), document.createTextNode(String(set[id])));
+        if (set.tiebreak && set[id] < set[other]) cell.append(element("sup", "", set.tiebreak[id]));
+        row.append(cell);
       });
       body.append(row);
     });
-    table.append(head, body);
-    const actions = element("div", "match-result-actions");
+    board.append(body);
+    const scoreboard = reveal(element("section", "result-board-panel"), timing.headline);
+    scoreboard.append(reveal(element("h3", "", config.scoreboard), timing.headline), board);
+    const meta = reveal(element("div", "result-tags result-match-meta"), timing.headline + timing.column);
+    meta.append(element("span", "result-tag", DATA.basic.surface.find(item => item.id === options.surface).name),
+      element("span", "result-tag", ui.formats.find(item => item.id === options.format).name));
+    scoreboard.append(meta);
+    const sectionsAt = timing.headline + result.sets.length * timing.column + timing.reveal;
+    const highlights = reveal(element("section", "result-highlights"), sectionsAt);
+    if (presentation.moments.length) {
+      highlights.append(element("h3", "", config.highlights));
+      const list = element("ul");
+      presentation.moments.forEach(item => {
+        const line = element("li", "", message(config.moments[item.type], item));
+        line.dataset.moment = item.type;
+        list.append(line);
+      });
+      highlights.append(list);
+    }
+    const stats = reveal(element("section", "result-stats"), sectionsAt + timing.section);
+    stats.append(element("h3", "", ui.stats));
+    const sides = element("div", "result-stat-names");
+    ui.sides.forEach(({ id }) => sides.append(element("span", "", options[id].player.name || DATA.text.anonymous)));
+    stats.append(sides);
+    presentation.stats.forEach(item => {
+      const row = element("div", "result-stat");
+      row.dataset.stat = item.field;
+      const values = element("div", "result-stat-values");
+      const bar = element("div", "result-stat-bar");
+      bar.setAttribute("aria-hidden", "true");
+      bar.style.setProperty("--a-share", item.share * 100 + "%");
+      const labels = {};
+      ui.sides.forEach(({ id }) => {
+        const numbers = result.stats[id];
+        labels[id] = numbers[item.field].toLocaleString("ja-JP");
+        if (item.percent) labels[id] = numbers[item.total] ? numbers[item.field].toLocaleString("ja-JP", { style: "percent", minimumFractionDigits: ui.percentDigits, maximumFractionDigits: ui.percentDigits }) : DATA.text.missingScore;
+        else if (item.total) labels[id] = message(ui.fraction, { won: labels[id], total: numbers[item.total].toLocaleString("ja-JP") });
+        const better = item.better === id ? " stat-better" : "";
+        values.append(element("strong", "" + better, labels[id]));
+        bar.append(element("span", "stat-side-" + id + better));
+      });
+      row.append(element("h4", "", item.name), values, bar);
+      row.setAttribute("aria-label", message(config.statComparison, { name: item.name, ...labels }));
+      stats.append(row);
+    });
+    const actions = reveal(element("div", "match-result-actions"), sectionsAt + 2 * timing.section);
     const again = element("button", "button primary", ui.again);
     again.type = "button";
     again.addEventListener("click", () => runMatch(matchRun.setup));
     const change = element("a", "button secondary", ui.changeSetup);
     change.href = "#/match";
     actions.append(again, change);
-    screen.append(heading, table, actions);
+    const confetti = element("div", "result-confetti");
+    confetti.setAttribute("aria-hidden", "true");
+    for (let index = 0; index < timing.particles; index++) {
+      const particle = element("span");
+      particle.style.setProperty("--particle-x", (index * config.particles.spread % 100) + "%");
+      particle.style.setProperty("--particle-drift", (index % 2 ? 1 : -1) * (config.particles.drift + index % config.particles.variations * config.particles.driftStep) + "px");
+      particle.style.setProperty("--particle-delay", (timing.headline + index % config.particles.groups * config.particles.stagger) + "s");
+      confetti.append(particle);
+    }
+    screen.append(contenders, heading, scoreboard);
+    if (presentation.moments.length) screen.append(highlights);
+    screen.append(stats, actions, confetti);
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) finishResultAnimation();
+    screen.onanimationend = event => {
+      if (event.animationName === "result-confetti" && event.target === confetti.lastElementChild) confetti.replaceChildren();
+    };
   }
+
+  function finishResultAnimation() {
+    const screen = document.getElementById("match-result-screen");
+    screen.classList.add("result-final");
+    screen.querySelector(".result-confetti")?.replaceChildren();
+  }
+
+  document.addEventListener("pointerdown", () => {
+    if (!document.getElementById("match-result-screen").hidden) finishResultAnimation();
+  });
+  const resultMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  resultMotion.addEventListener("change", event => {
+    if (event.matches && !document.getElementById("match-result-screen").hidden) finishResultAnimation();
+  });
 
   function renderRoute() {
     const route = resolveEditRoute(world, location.hash);
@@ -940,6 +1108,7 @@ function calculateScore(card) {
     if (location.hash === "#/match/play" && !matchRun) history.replaceState(null, "", "#/match");
     const setup = location.hash === "#/match";
     const result = location.hash === "#/match/play";
+    document.body.classList.toggle("result-page", result);
     if (!route && !detail && !setup && !result && location.hash !== "#/") history.replaceState(null, "", "#/");
     document.getElementById("list-screen").hidden = Boolean(route || detail || setup || result);
     document.getElementById("list-actions").hidden = Boolean(route || detail || setup || result);
@@ -1007,15 +1176,15 @@ function calculateScore(card) {
     return { label, content };
   }
 
-  function setPoseHand(svg) {
+  function setPoseHand(svg, hand = player.hand) {
     const [x, , width] = svg.getAttribute("viewBox").split(/\s+/).map(Number);
     const body = svg.querySelector("[data-pose-body]");
-    svg.dataset.hand = player.hand;
-    if (player.hand === "left") body.setAttribute("transform", `translate(${2 * x + width} 0) scale(-1 1)`);
+    svg.dataset.hand = hand;
+    if (hand === "left") body.setAttribute("transform", `translate(${2 * x + width} 0) scale(-1 1)`);
     else body.removeAttribute("transform");
   }
 
-  function poseGraphic(pose) {
+  function poseGraphic(pose, hand = player.hand) {
     const source = new DOMParser().parseFromString(DATA.poseSvg[pose.file], "image/svg+xml").documentElement;
     const svg = document.importNode(source, true);
     svg.classList.add("pose-silhouette");
@@ -1027,7 +1196,7 @@ function calculateScore(card) {
     body.setAttribute("data-pose-body", "");
     while (svg.firstChild) body.append(svg.firstChild);
     svg.append(body);
-    setPoseHand(svg);
+    setPoseHand(svg, hand);
     return svg;
   }
 
@@ -1204,7 +1373,7 @@ function calculateScore(card) {
         if (input.value !== value) input.value = value;
       }
     });
-    form.querySelectorAll(".pose-silhouette").forEach(setPoseHand);
+    form.querySelectorAll(".pose-silhouette").forEach(svg => setPoseHand(svg));
   }
 
   function statRank(value) {
