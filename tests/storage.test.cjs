@@ -435,3 +435,63 @@ test("グラフのランク境界は5章のしきい値を使い、縦軸範囲�
   assert.deepEqual(scale.boundaries.map(rank=>[rank.rank,rank.min]), [["A",3200],["B",2800],["C",2400],["D",2000],["E",1600]]);
   assert.ok(scale.boundaries.every(rank=>rank.min >= scale.min && rank.min <= scale.max));
 });
+
+test("ポーズはカード単位で全選択肢を保存復元し、欠損・未知IDはフォアハンドに補う", () => {
+  const h = harness();
+  assert.equal(h.run("createDefaultCard().pose"), "forehand");
+  for (const raw of [{}, { pose: "unknown" }, { pose: null }]) {
+    assert.equal(h.run(`normalizeCard(${JSON.stringify(raw)}).pose`), "forehand");
+  }
+  const poses = copy(h.run("DATA.poses.map(item => item.id)"));
+  assert.equal(poses.length, 11);
+  assert.equal(poses[0], "none");
+  for (const pose of poses) {
+    h.run(`var world=createEmptyWorld(); var entity=addWorldPlayer(world); entity.cards["2017-1"].pose=${JSON.stringify(pose)}; WORLD_STORAGE.save(world);`);
+    assert.equal(h.run('WORLD_STORAGE.load().players[0].cards["2017-1"].pose'), pose);
+    assert.equal(h.run('"pose" in WORLD_STORAGE.load().players[0]'), false);
+    assert.equal(h.run('calculateScore(entity.cards["2017-1"]).value'), 2000);
+  }
+  h.run('DATA.poses.push({id:"added_pose",name:"追加ポーズ",file:DATA.poses[1].file});');
+  assert.equal(h.run('normalizeCard({pose:"added_pose"}).pose'), "added_pose");
+});
+
+test("既存v2と古いv1／v2 JSONのポーズを補い、JSON書き出し・置き換え・追加でも保持する", () => {
+  const h = harness({ "tennisMaker.v2.world": JSON.stringify({ version: 2, players: [{ id: "p_old12345", cards: { "2017-1": {} } }] }) });
+  assert.equal(h.run('WORLD_STORAGE.load().players[0].cards["2017-1"].pose'), "forehand");
+  for (const legacy of [{ version: 1, name: "旧選手" }, { version: 2, players: [{ cards: { "2017-1": {} } }] }]) {
+    h.run(`var imported=parseWorldImport(${JSON.stringify(JSON.stringify(legacy))});`);
+    assert.equal(h.run('imported.players[0].cards["2017-1"].pose'), "forehand");
+  }
+  h.run('var world=createEmptyWorld(); var entity=addWorldPlayer(world); entity.cards["2017-1"].pose="serve_toss"; entity.cards["2017-2"]=normalizeCard({pose:"none"}); world.latestSeriesId="2017-2"; var snapshot=prepareWorldExport(world); var imported=parseWorldImport(snapshot.text); var replaced=importWorld(createEmptyWorld(),imported,"replace"); var appended=importWorld(world,imported,"append");');
+  assert.deepEqual(copy(h.run('Object.values(replaced.players[0].cards).map(card=>card.pose)')), ["serve_toss", "none"]);
+  assert.deepEqual(copy(h.run('appended.players.map(player=>Object.values(player.cards).map(card=>card.pose))')), [["serve_toss", "none"], ["serve_toss", "none"]]);
+});
+
+test("カード作成・前シリーズからコピーでポーズを引き継ぎ、リセットは対象カードだけ戻す", () => {
+  const h = harness();
+  h.run('var entity=normalizePlayer({name:"固定名",hand:"left",cards:{"2017-1":{pose:"running"},"2017-2":{pose:"none"}}}); createWorldCard(entity,"2018-1"); createWorldCard(entity,"2018-2");');
+  assert.equal(h.run('entity.cards["2018-1"].pose'), "none");
+  h.run('entity.cards["2018-1"].pose="smash"; copyPreviousCard(entity,"2018-2");');
+  assert.equal(h.run('entity.cards["2018-2"].pose'), "smash");
+  assert.equal(h.run('entity.cards["2017-1"].pose'), "running");
+  h.run('resetWorldCard(entity,"2018-2");');
+  assert.equal(h.run('entity.cards["2018-2"].pose'), "forehand");
+  assert.equal(h.run('entity.cards["2018-1"].pose'), "smash");
+  assert.equal(h.run('entity.hand'), "left");
+  assert.equal(h.run('entity.name'), "固定名");
+  h.run('var future=normalizePlayer({cards:{"2018-2":{pose:"celebrate"}}}); createWorldCard(future,"2017-1"); var empty=normalizePlayer({cards:{}}); createWorldCard(empty,"2017-1");');
+  assert.equal(h.run('future.cards["2017-1"].pose'), "celebrate");
+  assert.equal(h.run('empty.cards["2017-1"].pose'), "forehand");
+});
+
+test("同梱ポーズSVGは支給素材と全件一致する", () => {
+  const h = harness();
+  const embedded = copy(h.run("DATA.poseSvg"));
+  const poses = copy(h.run("DATA.poses"));
+  const files = fs.readdirSync(path.join(root, "assets/poses")).sort();
+  assert.deepEqual(Object.keys(embedded).map(file => path.basename(file)).sort(), files);
+  for (const pose of poses.filter(item => item.file)) {
+    assert.equal(embedded[pose.file], fs.readFileSync(path.join(root, pose.file), "utf8"));
+    assert.match(embedded[pose.file], /viewBox="0 0 1020 1438"/);
+  }
+});

@@ -37,7 +37,7 @@ function normalizeCard(raw) {
   DATA.textFields.filter(field => !DATA.playerFields.includes(field.id)).forEach(field => {
     if (typeof raw[field.id] === "string") player[field.id] = Array.from(raw[field.id]).slice(0, field.max).join("");
   });
-  const choices = { ...DATA.basic, playStyle: DATA.playStyles, serve: DATA.serves };
+  const choices = { ...DATA.basic, playStyle: DATA.playStyles, serve: DATA.serves, pose: DATA.poses };
   Object.entries(choices).forEach(([key, items]) => {
     if (DATA.playerFields.includes(key)) return;
     if (items.some(item => item.id === raw[key])) player[key] = raw[key];
@@ -780,6 +780,30 @@ function calculateScore(card) {
     return { label, content };
   }
 
+  function setPoseHand(svg) {
+    const [x, , width] = svg.getAttribute("viewBox").split(/\s+/).map(Number);
+    const body = svg.querySelector("[data-pose-body]");
+    svg.dataset.hand = player.hand;
+    if (player.hand === "left") body.setAttribute("transform", `translate(${2 * x + width} 0) scale(-1 1)`);
+    else body.removeAttribute("transform");
+  }
+
+  function poseGraphic(pose) {
+    const source = new DOMParser().parseFromString(DATA.poseSvg[pose.file], "image/svg+xml").documentElement;
+    const svg = document.importNode(source, true);
+    svg.classList.add("pose-silhouette");
+    svg.dataset.pose = pose.id;
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("preserveAspectRatio", "xMidYMax meet");
+    const body = document.createElementNS(svg.namespaceURI, "g");
+    body.setAttribute("data-pose-body", "");
+    while (svg.firstChild) body.append(svg.firstChild);
+    svg.append(body);
+    setPoseHand(svg);
+    return svg;
+  }
+
   function buildForm() {
     form.replaceChildren();
     const basic = section(DATA.text.basic);
@@ -859,6 +883,17 @@ function calculateScore(card) {
       choices.append(field);
     });
 
+    const illustration = section(DATA.text.illustration);
+    const poses = element("div", "tiles pose-tiles");
+    DATA.poses.forEach(pose => {
+      const option = radioOption("pose", null, pose.id, undefined, "tile pose-tile");
+      const preview = element("span", "pose-preview");
+      if (pose.file) preview.append(poseGraphic(pose));
+      option.content.append(preview, element("strong", "", pose.name));
+      poses.append(option.label);
+    });
+    illustration.append(poses);
+
     const special = section(DATA.text.special);
     ["shotSkills", "rankSkills"].forEach(group => {
       const container = element("div", "skill-group " + group);
@@ -937,6 +972,7 @@ function calculateScore(card) {
         if (input.value !== value) input.value = value;
       }
     });
+    form.querySelectorAll(".pose-silhouette").forEach(setPoseHand);
   }
 
   function statRank(value) {
@@ -986,7 +1022,17 @@ function calculateScore(card) {
     const score = calculateScore(editingPlayer.cards[editingSeriesId]);
     const overall = element("div", "overall");
     overall.append(element("span", "overall-label", DATA.text.overall), element("strong", "score-number", score.value.toLocaleString("ja-JP")), element("span", "overall-rank", score.rank));
-    header.append(courtLines, identity, overall);
+    header.append(courtLines);
+    const pose = DATA.poses.find(item => item.id === player.pose);
+    if (pose.file) {
+      const silhouette = poseGraphic(pose);
+      const [, , width, height] = silhouette.getAttribute("viewBox").split(/\s+/).map(Number);
+      const background = element("div", "card-pose");
+      background.style.aspectRatio = `${width} / ${height}`;
+      background.append(silhouette);
+      header.append(background);
+    }
+    header.append(identity, overall);
 
     const stats = element("div", "card-stats");
     DATA.stats.front.forEach(item => {

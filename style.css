@@ -1,5 +1,5 @@
 * { box-sizing: border-box; }
-:root { color-scheme: light; }
+:root { color-scheme: light; --pose-height: 98%; --pose-center-x: 57%; --pose-opacity: 0.55; }
 body {
   margin: 0;
   color: var(--navy);
@@ -34,7 +34,8 @@ input[type="text"], input[type="number"] {
   grid-template-columns: minmax(0, 1fr) 72px;
   align-items: center;
   gap: 8px;
-  min-height: 166px;
+  min-height: 200px;
+  overflow: hidden;
   padding: 22px 16px;
   color: var(--white);
   background: var(--surface);
@@ -42,7 +43,9 @@ input[type="text"], input[type="number"] {
 }
 .court-header.striped { background-color: var(--surface); background-image: linear-gradient(90deg, var(--surface) 0%, var(--surface) 50%, var(--stripe) 50%, var(--stripe) 100%); background-size: 110px 100%; }
 .court-lines { position: absolute; inset: 12px 20px; width: calc(100% - 40px); height: calc(100% - 24px); opacity: 0.28; pointer-events: none; }
-.card-identity, .overall { position: relative; min-width: 0; }
+.card-pose { position: absolute; left: var(--pose-center-x); bottom: 0; height: var(--pose-height); transform: translateX(-50%); opacity: var(--pose-opacity); pointer-events: none; z-index: 1; }
+.pose-silhouette { display: block; width: 100%; height: 100%; }
+.card-identity, .overall { position: relative; min-width: 0; z-index: 2; }
 .series-badge { display: inline-flex; max-width: 100%; padding: 2px 7px; margin-bottom: 7px; border-radius: 4px; background: var(--paper); color: var(--navy); font-size: 10px; font-weight: 600; overflow-wrap: anywhere; }
 .nickname { margin: 0 0 5px; font-size: 11px; font-weight: 600; overflow-wrap: anywhere; }
 .card-name { margin: 0; font-size: 27px; line-height: 1.3; letter-spacing: -0.045em; overflow-wrap: anywhere; }
@@ -113,6 +116,10 @@ legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
 .tile .choice-content { display: flex; flex-direction: column; align-items: flex-start; height: 100%; padding: 10px; border: 3px solid var(--line); border-radius: 10px; background: var(--paper); }
 .tile .choice-content strong { color: var(--type-color, var(--navy)); font-size: 12px; line-height: 1.5; margin-top: 7px; }
 .tile .choice-input:checked + .choice-content { border-color: var(--ball); background: var(--paper); box-shadow: 0 0 0 1px var(--navy); }
+.pose-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pose-tile .choice-content { padding: 4px; align-items: center; }
+.pose-preview { display: block; width: 100%; aspect-ratio: 1; background: var(--navy); padding: 4px; border-radius: 4px; }
+.pose-tile .choice-content strong { font-size: 10px; text-align: center; overflow-wrap: anywhere; }
 .tile-field + .tile-field { margin-top: 24px; }
 .skill-group h3 { margin: 0 0 12px; }
 .skill-group + .skill-group { margin-top: 28px; }
@@ -226,6 +233,7 @@ dialog p { font-size: 12px; }
   .section-body { padding: 4px 22px 24px; }
   .form-section summary { padding: 18px 22px; }
   .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pose-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .toast { bottom: 24px; }
   #download-image { display: flex; }
 }
