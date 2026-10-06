@@ -301,6 +301,7 @@ function normalizeTournament(raw, world, usedIds = new Set()) {
   });
   tournament.fatigue = Object.fromEntries(ids.map(playerId => [playerId, finite(raw.fatigue?.[playerId]) ? raw.fatigue[playerId] : 0]));
   tournament.championId = ids.includes(raw.championId) ? raw.championId : null;
+  advanceTournament(tournament);
   return tournament;
 }
 
@@ -336,12 +337,113 @@ function tournamentRoundName(round, slots) {
   return DATA.tournament.rounds[remaining] || DATA.tournament.ui.round.replace("{round}", round);
 }
 
+function tournamentMatchSeed(tournament, matchId) {
+  const config = DATA.tournament.matchSeed;
+  let seed = config.basis ^ tournament.seed;
+  for (const character of matchId) seed = Math.imul(seed ^ character.charCodeAt(0), config.prime);
+  return seed >>> 0;
+}
+
+function tournamentWinner(match) {
+  return match?.status === "bye" ? match.a || match.b : match?.result ? match[match.result.winner] : null;
+}
+
+function advanceTournament(tournament) {
+  tournament.matches.forEach(match => {
+    if (match.round <= 1) return;
+    const previous = tournament.matches.filter(item => item.round === match.round - 1);
+    match.a = tournamentWinner(previous[(match.index - 1) * 2]);
+    match.b = tournamentWinner(previous[(match.index - 1) * 2 + 1]);
+  });
+  const final = tournament.matches.at(-1);
+  if (final?.result) {
+    tournament.status = "done";
+    tournament.championId = tournamentWinner(final);
+  }
+}
+
+function tournamentMatchOptions(tournament, match) {
+  if (!match?.a || !match.b || !tournament.snapshot[match.a] || !tournament.snapshot[match.b]) return null;
+  const options = { ...DATA.tournament.matchSettings, surface: tournament.surface,
+    format: match.round === Math.log2(tournament.slots.length) && tournament.finalFormat ? tournament.finalFormat : tournament.format,
+    seed: match.result ? match.result.seed : tournamentMatchSeed(tournament, match.id) };
+  const config = DATA.tournament.fatigue;
+  ["a", "b"].forEach(side => {
+    const id = match[side], saved = tournament.snapshot[id];
+    const recovery = DATA.match.abilities.ranks[saved.card.rankSkills.recovery];
+    const played = tournament.matches.some(previous => previous.id !== match.id && previous.result && (previous.a === id || previous.b === id));
+    const carry = match.result ? match.result.carry[side]
+      : played ? Math.max(0, (tournament.fatigue[id] || 0) - config.recoveryBase - recovery * config.recoveryScale) : 0;
+    options[side] = { player: { id, ...normalizeFixedFields(saved) }, card: normalizeCard(saved.card), seriesId: tournament.seriesId, carryFatigue: carry };
+  });
+  return options;
+}
+
+function playTournamentMatch(world, tournament, matchId, simulate = TennisMatch.simulate) {
+  if (tournament.status === "done") return null;
+  if (tournament.status === "draft") Object.assign(tournament, normalizeTournament(tournament, world));
+  let match = tournament.matches.find(item => item.id === matchId);
+  if (tournament.entrants.length < DATA.tournament.limits.minEntrants || match?.status !== "pending" || !match.a || !match.b) return null;
+  if (tournament.status === "draft") {
+    tournament.snapshot = Object.fromEntries(tournament.entrants.map(({ playerId }) => {
+      const player = world.players.find(item => item.id === playerId);
+      return [playerId, { ...normalizeFixedFields(player), card: normalizeCard(player.cards[tournament.seriesId]) }];
+    }));
+    tournament.fatigue = Object.fromEntries(tournament.entrants.map(({ playerId }) => [playerId, 0]));
+    tournament.status = "live";
+    advanceTournament(tournament);
+    match = tournament.matches.find(item => item.id === matchId);
+  }
+  const options = tournamentMatchOptions(tournament, match), result = simulate(options);
+  match.result = JSON.parse(JSON.stringify({ winner: result.winner, scoreText: result.scoreText, sets: result.sets,
+    retired: result.retired, seed: options.seed, carry: { a: options.a.carryFatigue, b: options.b.carryFatigue }, stats: result.stats, points: result.points.length }));
+  match.status = "done";
+  const config = DATA.tournament.fatigue;
+  ["a", "b"].forEach(side => {
+    tournament.fatigue[match[side]] = options[side].carryFatigue + result.points.length * config.point
+      * (options[side].card.gold.includes("ironman") ? config.ironman : 1);
+  });
+  advanceTournament(tournament);
+  return { options, result };
+}
+
+function replayTournamentMatch(tournament, matchId, simulate = TennisMatch.simulate) {
+  const match = tournament.matches.find(item => item.id === matchId);
+  if (!match?.result) return null;
+  const options = tournamentMatchOptions(tournament, match);
+  return options ? { options, result: simulate(options) } : null;
+}
+
+function playTournamentRound(world, tournament, round, simulate = TennisMatch.simulate) {
+  const ids = tournament.matches.filter(match => match.round === round && match.status === "pending" && match.a && match.b).map(match => match.id);
+  ids.forEach(id => playTournamentMatch(world, tournament, id, simulate));
+}
+
+function playTournamentRemaining(world, tournament, simulate = TennisMatch.simulate) {
+  for (let round = 1; round <= Math.log2(tournament.slots.length); round++) playTournamentRound(world, tournament, round, simulate);
+}
+
+function tournamentChampionPath(tournament) {
+  return tournament.matches.filter(match => tournamentWinner(match) === tournament.championId).map(match => ({
+    round: tournamentRoundName(match.round, tournament.slots.length), bye: match.status === "bye",
+    opponent: tournament.snapshot[match.a === tournament.championId ? match.b : match.a]?.name || DATA.text.anonymous,
+    score: match.result?.scoreText || ""
+  }));
+}
+
 function resolveTournamentRoute(world, hash) {
   if (hash === "#/tournaments") return { type: "list" };
   if (hash === "#/tournaments/new") return { type: "edit", tournament: null };
-  const match = /^#\/tournament\/(t_[a-z0-9]+)(\/edit)?$/.exec(hash);
+  const match = /^#\/tournament\/(t_[a-z0-9]+)(?:\/(edit|champion|match\/(r\d+-m\d+)))?$/.exec(hash);
   const tournament = match && world.tournaments.find(item => item.id === match[1]);
-  return tournament ? { type: match[2] && tournament.status === "draft" ? "edit" : "draw", tournament } : null;
+  if (!tournament) return null;
+  if (match[3]) {
+    const game = tournament.matches.find(item => item.id === match[3] && item.result);
+    return game ? { type: "match", tournament, match: game } : null;
+  }
+  const type = match[2] === "edit" && tournament.status === "draft" ? "edit"
+    : match[2] === "champion" && tournament.status === "done" && tournament.snapshot[tournament.championId] ? "champion" : "draw";
+  return { type, tournament };
 }
 
 function createEmptyWorld() {
@@ -1166,7 +1268,7 @@ function matchImageFileName(options) {
     const options = JSON.parse(JSON.stringify(entries));
     clearTimeout(playbackTimer);
     matchRun = { setup: JSON.parse(JSON.stringify(setup)), options, result: TennisMatch.simulate(options),
-      phase: "replay", playback: { shown: 0, logShown: 0, paused: false, speed: DATA.match.playback.initialSpeed } };
+      route: "#/match/play", theme: "default", phase: "replay", playback: { shown: 0, logShown: 0, paused: false, speed: DATA.match.playback.initialSpeed } };
     world.ui.matchSetup = matchRun.setup;
     persistWorld();
     if (location.hash === "#/match/play") renderRoute();
@@ -1186,10 +1288,10 @@ function matchImageFileName(options) {
   function schedulePlayback() {
     clearTimeout(playbackTimer);
     const run = matchRun;
-    if (!run || run.phase !== "replay" || run.playback.paused || location.hash !== "#/match/play") return;
+    if (!run || run.phase !== "replay" || run.playback.paused || location.hash !== run.route) return;
     const finished = run.playback.shown === run.result.points.length;
     playbackTimer = setTimeout(() => {
-      if (matchRun !== run || location.hash !== "#/match/play" || run.playback.paused) return;
+      if (matchRun !== run || location.hash !== run.route || run.playback.paused) return;
       if (finished) showMatchResult();
       else {
         run.playback.shown++;
@@ -1244,7 +1346,7 @@ function matchImageFileName(options) {
   }
 
   function renderMatchReplay() {
-    applyMatchTheme();
+    applyMatchTheme(matchRun.theme);
     const screen = document.getElementById("match-replay-screen");
     const { options, result, playback } = matchRun;
     const config = DATA.match.playback;
@@ -1302,6 +1404,7 @@ function matchImageFileName(options) {
     result.log.slice(0, playback.logShown).forEach(item => batch.append(commentaryLine(item)));
     list.append(batch);
     commentary.append(list);
+    if (matchRun.tournamentId) screen.append(tournamentLink(DATA.tournament.ui.returnDraw, "#/tournament/" + matchRun.tournamentId));
     screen.append(panel, commentary);
     appendMatchCommentary();
     updateReplayBoard();
@@ -1341,7 +1444,7 @@ function matchImageFileName(options) {
     const timing = config.animation;
     const { options, result } = matchRun;
     const presentation = matchPresentation(options, result);
-    applyMatchTheme();
+    applyMatchTheme(matchRun.theme);
     Object.entries(timing).forEach(([key, value]) => screen.style.setProperty("--time-" + key, value + "s"));
     const reveal = (node, delay) => {
       node.classList.add("result-reveal");
@@ -1442,16 +1545,9 @@ function matchImageFileName(options) {
     save.type = "button";
     save.id = "save-match-image";
     save.addEventListener("click", exportMatchImage);
-    actions.append(again, change, save);
-    const confetti = element("div", "result-confetti");
-    confetti.setAttribute("aria-hidden", "true");
-    for (let index = 0; index < timing.particles; index++) {
-      const particle = element("span");
-      particle.style.setProperty("--particle-x", (index * config.particles.spread % 100) + "%");
-      particle.style.setProperty("--particle-drift", (index % 2 ? 1 : -1) * (config.particles.drift + index % config.particles.variations * config.particles.driftStep) + "px");
-      particle.style.setProperty("--particle-delay", (timing.headline + index % config.particles.groups * config.particles.stagger) + "s");
-      confetti.append(particle);
-    }
+    if (matchRun.tournamentId) actions.append(tournamentLink(DATA.tournament.ui.returnDraw, matchRun.returnHash), save);
+    else actions.append(again, change, save);
+    const confetti = createResultConfetti();
     screen.append(contenders, heading, scoreboard);
     if (presentation.moments.length) screen.append(highlights);
     screen.append(stats, actions, confetti);
@@ -1459,6 +1555,21 @@ function matchImageFileName(options) {
     screen.onanimationend = event => {
       if (event.animationName === "result-confetti" && event.target === confetti.lastElementChild) confetti.replaceChildren();
     };
+  }
+
+  function createResultConfetti() {
+    const config = DATA.match.presentation, timing = config.animation;
+    const confetti = element("div", "result-confetti");
+    confetti.setAttribute("aria-hidden", "true");
+    if (resultMotion.matches) return confetti;
+    for (let index = 0; index < timing.particles; index++) {
+      const particle = element("span");
+      particle.style.setProperty("--particle-x", (index * config.particles.spread % 100) + "%");
+      particle.style.setProperty("--particle-drift", (index % 2 ? 1 : -1) * (config.particles.drift + index % config.particles.variations * config.particles.driftStep) + "px");
+      particle.style.setProperty("--particle-delay", (timing.headline + index % config.particles.groups * config.particles.stagger) + "s");
+      confetti.append(particle);
+    }
+    return confetti;
   }
 
   function finishResultAnimation() {
@@ -1473,6 +1584,7 @@ function matchImageFileName(options) {
   const resultMotion = matchMedia("(prefers-reduced-motion: reduce)");
   resultMotion.addEventListener("change", event => {
     if (event.matches && !document.getElementById("match-result-screen").hidden) finishResultAnimation();
+    if (event.matches) document.querySelector("#tournament-champion-screen .result-confetti")?.replaceChildren();
   });
 
   function tournamentLink(text, href) {
@@ -1551,14 +1663,15 @@ function matchImageFileName(options) {
     themes.append(tiles); fields.append(themes);
     const entrants = element("fieldset", "tournament-entrants");
     entrants.append(element("legend", "", ui.entrants));
-    const candidates = tournamentCandidates(world, draft.seriesId), selection = element("p"), hint = element("p", "match-hint", ui.entrantHint);
+    const candidates = tournamentCandidates(world, draft.seriesId), selection = element("p"), hint = element("p", "entrant-hint", ui.entrantHint);
+    hint.id = "tournament-entrant-hint";
     const checks = element("div", "entrant-list"), tools = element("div", "management-buttons");
     const save = element("button", "button primary", tournament ? ui.save : ui.create);
     save.type = "submit"; save.id = "save-tournament";
     function updateSelection() {
       selection.textContent = message(ui.selected, { count: draft.entrantIds.length });
-      save.disabled = draft.entrantIds.length < config.limits.minEntrants || draft.entrantIds.length > config.limits.maxEntrants;
-      hint.hidden = !save.disabled;
+      const valid = draft.entrantIds.length >= config.limits.minEntrants && draft.entrantIds.length <= config.limits.maxEntrants;
+      if (valid) { hint.classList.remove("match-hint"); hint.removeAttribute("role"); }
       checks.querySelectorAll("input").forEach(input => { input.checked = draft.entrantIds.includes(input.value); });
     }
     [[ui.selectAll, true], [ui.clearAll, false]].forEach(([label, all]) => {
@@ -1580,6 +1693,12 @@ function matchImageFileName(options) {
     entrants.append(tools, selection, checks, hint); fields.append(entrants, save);
     fields.addEventListener("submit", event => {
       event.preventDefault();
+      if (draft.entrantIds.length < config.limits.minEntrants || draft.entrantIds.length > config.limits.maxEntrants) {
+        hint.classList.add("match-hint");
+        hint.setAttribute("role", "alert");
+        hint.scrollIntoView({ block: "center", behavior: "instant" });
+        return;
+      }
       const current = tournament ? updateWorldTournament(world, tournament, draft) && tournament : createWorldTournament(world, draft);
       if (!current) return toast(ui.invalid);
       persistWorld(); tournamentFormHash = null;
@@ -1602,7 +1721,8 @@ function matchImageFileName(options) {
         identity.append(element("strong", "", (tournament.status === "draft" ? player?.name : saved?.name) || DATA.text.anonymous));
         const seed = tournament.entrants.find(item => item.playerId === id)?.seedRank;
         if (seed) identity.append(element("small", "", message(ui.seed, { rank: seed })));
-        if (tournament.fatigue[id] > 0) identity.append(element("small", "", message(ui.fatigue, { value: tournament.fatigue[id].toFixed(1) })));
+        const fatigue = match.result ? match.result.carry[side] : tournament.fatigue[id];
+        if (fatigue > 0) identity.append(element("small", "", message(ui.fatigue, { value: fatigue.toFixed(1) })));
         row.append(identity);
         if (current) row.append(cardOverall(current));
         if (match.result?.winner === side) row.classList.add("tournament-winner");
@@ -1610,7 +1730,41 @@ function matchImageFileName(options) {
       pair.append(row);
     });
     if (match.result) pair.append(element("p", "tournament-score", match.result.scoreText));
+    const actions = element("div", "tournament-match-actions");
+    const available = match.status === "pending" && match.a && match.b && tournament.status !== "done";
+    if (available) {
+      [[ui.watch, true], [ui.resultOnly, false]].forEach(([label, watch]) => {
+        const button = element("button", "button secondary", label); button.type = "button";
+        button.addEventListener("click", () => performTournamentMatch(tournament, match.id, watch)); actions.append(button);
+      });
+    } else if (match.result) {
+      const button = element("button", "button secondary", ui.review); button.type = "button";
+      button.addEventListener("click", () => performTournamentMatch(tournament, match.id, true, true)); actions.append(button);
+    }
+    if (actions.childElementCount) pair.append(actions);
     return pair;
+  }
+
+  function prepareTournamentReplay(tournament, matchId, run, completedFinal = false) {
+    const route = "#/tournament/" + tournament.id + "/match/" + matchId;
+    matchRun = { ...run, route, theme: tournament.theme, tournamentId: tournament.id,
+      returnHash: "#/tournament/" + tournament.id + (completedFinal ? "/champion" : ""), phase: "replay",
+      playback: { shown: 0, logShown: 0, paused: false, speed: DATA.match.playback.initialSpeed } };
+  }
+
+  function performTournamentMatch(tournament, matchId, watch, review = false) {
+    const run = review ? replayTournamentMatch(tournament, matchId) : playTournamentMatch(world, tournament, matchId);
+    if (!run) return;
+    if (!review) persistWorld();
+    if (watch) {
+      prepareTournamentReplay(tournament, matchId, run, !review && tournament.status === "done");
+      if (location.hash === matchRun.route) renderRoute(); else location.hash = matchRun.route;
+    } else finishTournamentAction(tournament);
+  }
+
+  function finishTournamentAction(tournament) {
+    if (tournament.status === "done") location.hash = "#/tournament/" + tournament.id + "/champion";
+    else renderTournament(tournament);
   }
 
   function renderTournament(tournament) {
@@ -1621,6 +1775,7 @@ function matchImageFileName(options) {
     screen.replaceChildren(tournamentLink(ui.back, "#/tournaments"), element("h2", "", tournament.name || ui.anonymous));
     screen.append(element("p", "tournament-meta", [seriesName(tournament.seriesId), DATA.basic.surface.find(item => item.id === tournament.surface).name,
       DATA.match.ui.formats.find(item => item.id === tournament.format).name, DATA.tournament.statuses[tournament.status]].join(DATA.text.separator)));
+    if (tournament.status === "done") screen.append(tournamentLink(ui.championScreen, "#/tournament/" + tournament.id + "/champion"));
     if (tournament.status === "draft") {
       const actions = element("div", "management-buttons");
       actions.append(tournamentLink(ui.edit, "#/tournament/" + tournament.id + "/edit"));
@@ -1634,6 +1789,14 @@ function matchImageFileName(options) {
       actions.append(redraw, remove); screen.append(actions);
     }
     if (!tournament.slots.length) { screen.append(element("p", "", ui.noDraw)); return; }
+    if (tournament.status !== "done" && tournament.entrants.length >= DATA.tournament.limits.minEntrants) {
+      const all = element("button", "button secondary", ui.remainingAll); all.type = "button";
+      all.addEventListener("click", () => {
+        if (!window.confirm(ui.remainingConfirm)) return;
+        playTournamentRemaining(world, tournament); persistWorld(); finishTournamentAction(tournament);
+      });
+      screen.append(all);
+    }
     const rounds = Math.log2(tournament.slots.length), views = element("div", "tournament-tabs");
     if (tournament.slots.length > DATA.tournament.limits.bracketMax) tournamentView = "round";
     DATA.tournament.views.filter(view => view.id === "round" || tournament.slots.length <= DATA.tournament.limits.bracketMax).forEach(view => {
@@ -1650,7 +1813,14 @@ function matchImageFileName(options) {
       }
       const list = element("div", "round-matches");
       tournament.matches.filter(match => match.round === tournamentRound).forEach(match => list.append(tournamentPair(tournament, match)));
-      screen.append(tabs, list);
+      screen.append(tabs);
+      if (tournament.status !== "done") {
+        const all = element("button", "button secondary", ui.roundAll); all.type = "button";
+        all.disabled = !tournament.matches.some(match => match.round === tournamentRound && match.status === "pending" && match.a && match.b);
+        all.addEventListener("click", () => { playTournamentRound(world, tournament, tournamentRound); persistWorld(); finishTournamentAction(tournament); });
+        screen.append(all);
+      }
+      screen.append(list);
     } else {
       const scroll = element("div", "bracket-scroll"); scroll.tabIndex = 0; scroll.setAttribute("aria-label", DATA.tournament.views.find(view => view.id === "bracket").name);
       const grid = element("div", "bracket-grid"); grid.style.setProperty("--rounds", rounds);
@@ -1666,6 +1836,36 @@ function matchImageFileName(options) {
     }
   }
 
+  function renderTournamentChampion(tournament) {
+    const ui = DATA.tournament.ui, screen = document.getElementById("tournament-champion-screen");
+    const winner = tournament.snapshot[tournament.championId];
+    applyMatchTheme(tournament.theme);
+    screen.replaceChildren(tournamentLink(ui.returnDraw, "#/tournament/" + tournament.id));
+    const content = element("article", "champion-content"); content.id = "champion-content";
+    Object.entries(DATA.match.themes[tournament.theme]).forEach(([key, value]) => content.style.setProperty("--result-" + key, value));
+    const cup = svgElement("svg", { viewBox: "0 0 200 180", width: 180, height: 162, role: "img", "aria-label": ui.cup });
+    cup.classList.add("champion-cup");
+    cup.append(svgElement("path", { d: "M60 20H140V60C140 91 123 111 100 111S60 91 60 60Z M100 111V149 M72 156H128", fill: "none", stroke: "currentColor", "stroke-width": 12, "stroke-linejoin": "round" }),
+      svgElement("path", { d: "M60 32H30V55C30 79 46 91 67 91 M140 32H170V55C170 79 154 91 133 91", fill: "none", stroke: "currentColor", "stroke-width": 9 }));
+    const trophy = element("div", "champion-trophy"); trophy.append(cup);
+    const title = element("h2", "champion-title", message(ui.championTitle, { name: tournament.name || ui.anonymous }));
+    const series = element("p", "champion-series", seriesName(tournament.seriesId));
+    const championCard = element("article", "player-card");
+    renderPlayerCard(championCard, winner, winner.card, tournament.seriesId);
+    const path = element("section", "champion-path"); path.append(element("h3", "", ui.path));
+    const list = element("ul");
+    tournamentChampionPath(tournament).forEach(item => list.append(element("li", "", message(item.bye ? ui.pathBye : ui.pathMatch, item))));
+    path.append(list); content.append(trophy, title, series, championCard, path);
+    const save = element("button", "button primary", DATA.tournament.championExport.label); save.type = "button"; save.id = "save-champion-image";
+    save.addEventListener("click", () => exportChampionImage(tournament));
+    const confetti = createResultConfetti();
+    screen.style.setProperty("--time-confetti", DATA.match.presentation.animation.confetti + "s");
+    screen.append(content, save, confetti);
+    screen.onanimationend = event => {
+      if (event.animationName === "result-confetti" && event.target === confetti.lastElementChild) confetti.replaceChildren();
+    };
+  }
+
   function renderRoute() {
     clearTimeout(playbackTimer);
     const route = resolveEditRoute(world, location.hash);
@@ -1674,19 +1874,23 @@ function matchImageFileName(options) {
     if (!tournamentRoute && location.hash.startsWith("#/tournament")) {
       history.replaceState(null, "", "#/tournaments"); tournamentRoute = { type: "list" };
     }
-    if (location.hash === "#/match/play" && !matchRun) history.replaceState(null, "", "#/match");
+    if (tournamentRoute?.type === "match" && matchRun?.route !== location.hash) {
+      prepareTournamentReplay(tournamentRoute.tournament, tournamentRoute.match.id, replayTournamentMatch(tournamentRoute.tournament, tournamentRoute.match.id));
+    }
+    if (location.hash === "#/match/play" && matchRun?.route !== "#/match/play") history.replaceState(null, "", "#/match");
     const setup = location.hash === "#/match";
-    const result = location.hash === "#/match/play";
+    const result = location.hash === "#/match/play" || tournamentRoute?.type === "match";
     const replay = result && matchRun.phase === "replay";
     if (!result && matchRun?.phase === "replay" && matchRun.playback.shown < matchRun.result.points.length) matchRun.playback.paused = true;
     document.body.classList.toggle("result-page", result);
-    document.body.classList.toggle("tournament-page", tournamentRoute?.type === "draw");
+    document.body.classList.toggle("tournament-page", Boolean(tournamentRoute && ["draw", "champion", "match"].includes(tournamentRoute.type)));
     if (!route && !detail && !setup && !result && !tournamentRoute && location.hash !== "#/") history.replaceState(null, "", "#/");
     document.getElementById("list-screen").hidden = Boolean(route || detail || setup || result || tournamentRoute);
     document.getElementById("list-actions").hidden = Boolean(route || detail || setup || result || tournamentRoute);
     document.getElementById("tournaments-screen").hidden = tournamentRoute?.type !== "list";
     document.getElementById("tournament-form-screen").hidden = tournamentRoute?.type !== "edit";
     document.getElementById("tournament-screen").hidden = tournamentRoute?.type !== "draw";
+    document.getElementById("tournament-champion-screen").hidden = tournamentRoute?.type !== "champion";
     if (tournamentRoute?.type !== "edit") tournamentFormHash = null;
     document.getElementById("player-screen").hidden = !detail;
     document.getElementById("match-setup-screen").hidden = !setup;
@@ -1709,6 +1913,7 @@ function matchImageFileName(options) {
       if (tournamentRoute?.type === "list") renderTournaments();
       else if (tournamentRoute?.type === "edit") renderTournamentForm(tournamentRoute.tournament);
       else if (tournamentRoute?.type === "draw") renderTournament(tournamentRoute.tournament);
+      else if (tournamentRoute?.type === "champion") renderTournamentChampion(tournamentRoute.tournament);
       else if (detail) renderPlayer(detail);
       else if (setup) renderMatchSetup();
       else if (replay) renderMatchReplay();
@@ -1962,7 +2167,12 @@ function matchImageFileName(options) {
   }
 
   function renderCard() {
-    card.replaceChildren();
+    renderPlayerCard(card, editingPlayer, editingPlayer.cards[editingSeriesId], editingSeriesId);
+  }
+
+  function renderPlayerCard(target, fixed, current, seriesId) {
+    const player = { ...normalizeFixedFields(fixed), ...normalizeCard(current) };
+    target.replaceChildren();
     const surface = DATA.basic.surface.find(item => item.id === player.surface);
     const header = element("header", "court-header");
     header.style.setProperty("--surface", surface.color);
@@ -1991,23 +2201,23 @@ function matchImageFileName(options) {
       courtLines.append(line);
     });
     const identity = element("div", "card-identity");
-    identity.append(element("span", "series-badge", seriesName(editingSeriesId)));
+    identity.append(element("span", "series-badge", seriesName(seriesId)));
     if (player.nickname) identity.append(element("p", "nickname", player.nickname));
     const name = element("h2", "card-name", player.name || DATA.text.anonymous);
-    name.id = "card-name";
+    if (target === card) name.id = "card-name";
     identity.append(name);
     const meta = Object.keys(DATA.basic).map(key => {
       const item = DATA.basic[key].find(choice => choice.id === player[key]);
       return item.cardName || item.name;
     });
     identity.append(element("p", "card-meta", meta.join(DATA.text.separator)));
-    const score = calculateScore(editingPlayer.cards[editingSeriesId]);
+    const score = calculateScore(current);
     const overall = element("div", "overall");
     overall.append(element("span", "overall-label", DATA.text.overall), element("strong", "score-number", score.value.toLocaleString("ja-JP")), element("span", "overall-rank", score.rank));
     header.append(courtLines);
     const pose = DATA.poses.find(item => item.id === player.pose);
     if (pose.file) {
-      const silhouette = poseGraphic(pose);
+      const silhouette = poseGraphic(pose, player.hand);
       const [, , width, height] = silhouette.getAttribute("viewBox").split(/\s+/).map(Number);
       const background = element("div", "card-pose");
       background.style.aspectRatio = `${width} / ${height}`;
@@ -2081,7 +2291,7 @@ function matchImageFileName(options) {
       });
     });
     if (!chips.childElementCount) chips.append(element("p", "no-skills", DATA.text.noSkills));
-    card.append(header, stats, styles, chips);
+    target.append(header, stats, styles, chips);
   }
 
   function commit() {
@@ -2263,6 +2473,15 @@ function matchImageFileName(options) {
     return exportDomImage(snapshot, matchImageFileName(matchRun.options), {
       buttons: [document.getElementById("save-match-image")], label: config.label, width: config.width,
       background: theme.getPropertyValue("--result-bg-top").trim(), alt: config.imageAlt
+    });
+  }
+
+  function exportChampionImage(tournament) {
+    const config = DATA.tournament.championExport, name = tournament.snapshot[tournament.championId].name || DATA.text.anonymous;
+    const filename = message(config.fileLabel, { tournament: imageNamePart(tournament.name || DATA.tournament.ui.anonymous), name: imageNamePart(name), series: seriesName(tournament.seriesId, true) });
+    return exportDomImage(document.getElementById("champion-content"), filename, {
+      buttons: [document.getElementById("save-champion-image")], label: config.label, width: config.width,
+      background: DATA.match.themes[tournament.theme]["bg-top"], alt: config.imageAlt
     });
   }
 

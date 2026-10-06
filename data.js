@@ -339,6 +339,10 @@ const DATA = {
     random: { increment: 0x6D2B79F5, shiftA: 15, shiftB: 7, shiftC: 14, mix: 61, divisor: 4294967296 },
     initial: { surface: "hard", format: 3, finalFormat: 0, theme: "default" },
     draw: { minSlots: 2, seedDivisor: 4, fourSlotSeeds: 2 },
+    matchSeed: { basis: 2166136261, prime: 16777619 },
+    matchSettings: { firstServer: "random", injury: true },
+    fatigue: { point: 0.015, ironman: 0.5, recoveryBase: 2, recoveryScale: 0.7 },
+    championExport: { width: 360, label: "優勝を画像で保存", imageAlt: "大会優勝の画像", fileLabel: "tennis-champion_{tournament}_{name}_{series}.png" },
     templates: [
       { id: "slam", name: "グランドスラム風", format: 5, finalFormat: 0, theme: "default" },
       { id: "tour", name: "ツアー大会風", format: 3, finalFormat: 0, theme: "ice" },
@@ -363,7 +367,12 @@ const DATA = {
       redraw: "組み合わせをやり直す", delete: "大会を削除", deleteConfirm: "{name}を削除します。よろしいですか？",
       bye: "BYE", pending: "−", seed: "第{rank}シード", round: "{round}回戦", champion: "優勝：{name}",
       fatigue: "疲労 {value}", noDraw: "出場選手を2人以上選んでください。", created: "大会を作成しました。",
-      updated: "大会の設定を変更しました。", redrawn: "組み合わせをやり直しました。", invalid: "大会の設定を確認してください。"
+      updated: "大会の設定を変更しました。", redrawn: "組み合わせをやり直しました。", invalid: "大会の設定を確認してください。",
+      watch: "観戦する", resultOnly: "結果だけ", review: "振り返る", returnDraw: "大会に戻る",
+      roundAll: "このラウンドを結果だけで進める", remainingAll: "残りをすべて結果だけで進める",
+      remainingConfirm: "残りのすべての試合を結果だけで進めます。よろしいですか？",
+      championTitle: "{name} 優勝", championScreen: "優勝の画面", cup: "優勝カップ", path: "勝ち上がりの記録",
+      pathMatch: "{round}：{opponent}　{score}", pathBye: "{round}：不戦勝"
     },
     injury: {
       base: 0.0005, fatigueScale: 0.05,

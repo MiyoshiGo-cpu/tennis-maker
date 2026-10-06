@@ -17,6 +17,7 @@ function entry(name, durability = "D", carryFatigue) {
 }
 function options(extra = {}) { return { a: entry("A"), b: entry("B"), format: 3, surface: "hard", firstServer: "a", ...extra }; }
 const context = vm.createContext({});
+context.TennisMatch = TennisMatch;
 const source = fs.readFileSync(path.join(__dirname, "../app.js"), "utf8");
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../data.js"), "utf8") + "\n" + source.slice(0, source.indexOf("(function () {")), context);
 
@@ -240,4 +241,119 @@ test("全6テーマは仕様の色と共通キーを持ち、通常対戦のdefa
   context.round=2;assert.equal(vm.runInContext("tournamentRoundName(round,slots)",context),"準々決勝");
   context.round=3;assert.equal(vm.runInContext("tournamentRoundName(round,slots)",context),"準決勝");
   context.round=4;assert.equal(vm.runInContext("tournamentRoundName(round,slots)",context),"決勝");
+});
+
+
+function progressWorld(count, extra = {}) {
+  context.raw = {version:2,players:drawPlayers(count)};
+  vm.runInContext("world=normalizeWorld(raw)",context);
+  context.settings={...DATA.tournament.initial,seriesId:"2017-1",format:1,seed:12345,entrantIds:drawPlayers(count).map(p=>p.id),...extra};
+  vm.runInContext("t=createWorldTournament(world,settings)",context);
+}
+function run(code) { return vm.runInContext(code,context); }
+
+test("2・5・16・128人を観戦用計算と結果のみ・ラウンド一括を混ぜて優勝まで進められる",()=>{
+  for(const count of [2,5,16,128]) {
+    progressWorld(count,{finalFormat:3});
+    const first=copy(run("t.matches.find(m=>m.status==='pending'&&m.a&&m.b)"));context.matchId=first.id;
+    const watched=copy(run("playTournamentMatch(world,t,matchId)"));
+    assert.deepEqual(copy(run("replayTournamentMatch(t,matchId)")),watched);
+    assert.equal(run("Object.keys(t.snapshot).length"),count);
+    assert.equal(run("t.status"),count===2?"done":"live");
+    run("playTournamentRound(world,t,1); playTournamentRemaining(world,t)");
+    const tournament=copy(run("t"));
+    assert.equal(tournament.status,"done");assert.ok(tournament.snapshot[tournament.championId]);
+    assert.equal(tournament.matches.filter(m=>m.result).length,count-1);
+    assert.equal(tournament.matches.filter(m=>m.status==='bye').length,tournament.slots.length-count);
+    assert.ok(tournament.matches.every(m=>m.status==='bye'||m.status==='done'));
+    assert.ok(tournament.matches.filter(m=>m.round>1).every(m=>m.a&&m.b));
+    const seeds=tournament.matches.filter(m=>m.result).map(m=>m.result.seed);assert.equal(new Set(seeds).size,count-1);
+    assert.equal(run("tournamentMatchOptions(t,t.matches.at(-1)).format"),3);
+    for(const match of tournament.matches.filter(m=>m.result)) {
+      context.matchId=match.id;const replay=copy(run("replayTournamentMatch(t,matchId).result"));
+      assert.equal(replay.scoreText,match.result.scoreText);assert.equal(replay.winner,match.result.winner);
+      assert.deepEqual(replay.stats,match.result.stats);assert.equal(replay.points.length,match.result.points);
+      assert.equal(match.result.log,undefined);assert.equal(typeof match.result.points,"number");
+    }
+    assert.equal(run("tournamentChampionPath(t).length"),Math.log2(tournament.slots.length));
+  }
+});
+
+test("疲労はポイント数から増え、鉄人は半分、次戦前に回復ランクに応じて減る",()=>{
+  progressWorld(4);
+  run("world.players[0].cards['2017-1'].gold=['ironman']; world.players[0].cards['2017-1'].rankSkills.recovery='A'");
+  context.fake=options=>({winner:'a',scoreText:'6-0',sets:[{a:6,b:0}],retired:null,stats:{a:{},b:{}},points:Array(1000).fill({})});
+  run("playTournamentMatch(world,t,'r1-m1',fake); playTournamentMatch(world,t,'r1-m2',fake)");
+  assert.equal(run("t.fatigue.p_00001"),7.5);
+  const final=copy(run("tournamentMatchOptions(t,t.matches.at(-1))"));
+  assert.ok(Math.abs(final.a.carryFatigue-3.4)<1e-10);assert.equal(final.b.carryFatigue,13);
+  assert.equal(final.injury,true);assert.equal(final.firstServer,'random');
+  run("playTournamentMatch(world,t,'r2-m1',fake)");
+  assert.ok(Math.abs(run("t.fatigue.p_00001")-10.9)<1e-10);
+  assert.equal(run("t.fatigue[t.matches.at(-1).b]"),28);
+  assert.deepEqual(copy(run("t.matches.at(-1).result.carry")),{a:final.a.carryFatigue,b:13});
+  progressWorld(4);run("playTournamentMatch(world,t,'r1-m1',fake)");
+  run("t.fatigue[t.matches[0].a]=0.1; playTournamentMatch(world,t,'r1-m2',fake)");
+  assert.equal(run("tournamentMatchOptions(t,t.matches.at(-1)).a.carryFatigue"),0);
+  context.entry=final.a;context.opponent=final.b;
+  const state={format:1,surface:'hard',setNumber:1,gameNumber:1,games:{a:0,b:0},setsWon:{a:0,b:0},form:{a:0,b:0},lastGameWinner:null,tiebreak:false};
+  const tired=TennisMatch.effectiveStats(final.a,final.b,state,'a'),fresh=TennisMatch.effectiveStats({...final.a,carryFatigue:0},final.b,state,'a');
+  for(const key of ['control','power','speed'])assert.ok(Math.abs(fresh[key]-tired[key]-3.4)<1e-10);
+  // 初戦やBYE後はまだ疲労回復を行わない。Gの回復量は負でも初戦に加算しない。
+  progressWorld(5);run("world.players.forEach(p=>p.cards['2017-1'].rankSkills.recovery='G')");
+  context.matchId=run("t.matches.find(m=>m.status==='pending'&&m.a&&m.b).id");
+  const initial=copy(run("playTournamentMatch(world,t,matchId)"));
+  assert.equal(initial.options.a.carryFatigue,0);assert.equal(initial.options.b.carryFatigue,0);
+  const next=copy(run("tournamentMatchOptions(t,t.matches.find(m=>m.round===2&&m.a&&m.b))"));
+  assert.equal(next.a.carryFatigue,0);assert.equal(next.b.carryFatigue,0);
+  progressWorld(4);run("world.players.forEach(p=>p.cards['2017-1'].rankSkills.recovery='G')");
+  context.zero=options=>({winner:'a',scoreText:'6-0',sets:[{a:6,b:0}],retired:null,stats:{a:{},b:{}},points:[]});
+  run("playTournamentRound(world,t,1,zero)");
+  const second=copy(run("tournamentMatchOptions(t,t.matches.at(-1))"));
+  assert.ok(Math.abs(second.a.carryFatigue-0.1)<1e-10);assert.ok(Math.abs(second.b.carryFatigue-0.1)<1e-10);
+});
+
+test("開催時のsnapshotが編集・全選手削除・保存復元・JSON置換後も表示と振り返りを固定する",()=>{
+  progressWorld(5);context.matchId=run("t.matches.find(m=>m.a&&m.b&&m.status==='pending').id");
+  const original=copy(run("playTournamentMatch(world,t,matchId)"));const snapshot=copy(run("t.snapshot"));
+  run("world.players.forEach(p=>{p.name='編集後';p.hand='left';p.cards['2017-1'].stats.power=1;}); world.players.map(p=>p.id).forEach(id=>deleteWorldPlayer(world,id))");
+  assert.deepEqual(copy(run("t.snapshot")),snapshot);assert.deepEqual(copy(run("replayTournamentMatch(t,matchId)")),original);
+  run("world=importWorld(createEmptyWorld(),parseWorldImport(prepareWorldExport(world).text),'replace');t=world.tournaments[0]");
+  assert.deepEqual(copy(run("replayTournamentMatch(t,matchId)")),original);
+  run("playTournamentRemaining(world,t)");assert.equal(run("t.status"),'done');assert.equal(run("world.players.length"),0);
+  const before=copy(run("t"));run("world=normalizeWorld(JSON.parse(JSON.stringify(world)));t=world.tournaments[0]");assert.deepEqual(copy(run("t")),before);
+});
+
+test("RETを記録し棄権した側の相手が次のラウンドへ進み、同seedで再現する",()=>{
+  progressWorld(4);
+  const base=DATA.tournament.injury.base;
+  try {
+    DATA.tournament.injury.base=1;
+    const result=copy(run("playTournamentMatch(world,t,'r1-m1')"));
+    assert.ok(result.result.retired);assert.equal(result.result.winner,opposite(result.result.retired));
+    assert.match(run("t.matches[0].result.scoreText"),/RET$/);
+    assert.equal(run("t.matches.at(-1).a"),run("t.matches[0][t.matches[0].result.winner]"));
+    assert.deepEqual(copy(run("replayTournamentMatch(t,'r1-m1')")),result);
+  } finally { DATA.tournament.injury.base=base; }
+});
+
+test("ラウンド一括はそのラウンドだけを進め、BYEに疲労を加えず、既対戦を再計算しない",()=>{
+  progressWorld(5);const byeIds=copy(run("t.matches.filter(m=>m.status==='bye').map(m=>m.a||m.b)"));
+  run("playTournamentRound(world,t,1)");assert.equal(run("t.matches.filter(m=>m.round===1&&m.result).length"),1);
+  assert.equal(run("t.matches.filter(m=>m.round===2&&m.result).length"),0);
+  for(const id of byeIds){context.playerId=id;assert.equal(run("t.fatigue[playerId]"),0);}
+  const before=copy(run("t"));assert.equal(run("playTournamentMatch(world,t,'r1-m2')"),null);
+  run("playTournamentRound(world,t,1)");assert.deepEqual(copy(run("t")),before);
+  run("playTournamentRemaining(world,t)");assert.equal(run("t.status"),'done');
+  const after=copy(run("t"));run("playTournamentRemaining(world,t)");assert.deepEqual(copy(run("t")),after);
+});
+
+test("優勝の記録はラウンド順でBYEと相手・スコアを含み、終了済みの試合と優勝ルートを開ける",()=>{
+  progressWorld(5);context.fake=options=>({winner:'a',scoreText:'6-0',sets:[{a:6,b:0}],retired:null,stats:{a:{},b:{}},points:[]});
+  run("playTournamentRemaining(world,t,fake)");const path=copy(run("tournamentChampionPath(t)"));
+  assert.equal(path.length,3);assert.deepEqual(path.map(p=>p.round),['準々決勝','準決勝','決勝']);assert.equal(path[0].bye,true);
+  assert.ok(path.slice(1).every(p=>p.opponent&&p.score==='6-0'));
+  assert.equal(run("resolveTournamentRoute(world,'#/tournament/'+t.id+'/champion').type"),'champion');
+  context.matchId=run("t.matches.find(m=>m.result).id");assert.equal(run("resolveTournamentRoute(world,'#/tournament/'+t.id+'/match/'+matchId).type"),'match');
+  assert.equal(run("resolveTournamentRoute(world,'#/tournament/'+t.id+'/match/r9-m9')"),null);
 });

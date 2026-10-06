@@ -455,10 +455,27 @@ dialog p { font-size: 12px; }
 .tournament-player .list-rank { background: var(--result-accent); color: var(--result-winner-ink); }
 .tournament-winner { color: var(--result-accent); }
 .tournament-score { margin: 0; padding: 10px; border-top: 1px solid var(--result-main); font: 700 22px/1.4 "Barlow Condensed", sans-serif; }
+.entrant-hint { margin: 0; font-size: 13px; }
+.tournament-match-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-top: 1px solid var(--result-main); }
+.tournament-match-actions .button { font-size: 12px; padding: 8px 10px; }
+.round-matches { margin-top: 16px; }
+.champion-screen { position: relative; isolation: isolate; }
+.champion-content { max-width: 360px; margin: 20px auto; padding: 18px 12px; color: var(--result-text); background: linear-gradient(var(--result-bg-top), var(--result-bg-bottom)); border-radius: 12px; }
+.champion-trophy { display: flex; justify-content: center; }
+.champion-cup { display: block; width: 180px; height: 162px; color: var(--result-accent); }
+.champion-content .champion-title { margin: 12px 0; text-align: center; color: var(--result-accent); font-size: 24px; }
+.champion-series { text-align: center; color: var(--result-muted); margin: 0 0 20px; }
+.champion-content .player-card { color: var(--navy); }
+.champion-content .card-name { margin: 0; font-size: 27px; }
+.champion-path h3 { font-size: 16px; color: var(--result-accent); }
+.champion-path ul { list-style: none; padding: 0; margin: 0; }
+.champion-path li { padding: 10px 0; border-bottom: 1px solid var(--result-main); font-size: 12px; overflow-wrap: anywhere; }
+.champion-screen > .button:last-of-type { display: block; margin: 20px auto; }
+.champion-screen .result-confetti span:nth-child(even) { background: var(--result-accent); }
 .bracket-scroll { max-width: 100%; min-width: 0; overflow-x: auto; border: 1px solid var(--result-main); border-radius: 8px; }
 .bracket-grid { display: grid; grid-template-columns: repeat(var(--rounds), 240px); gap: 32px; width: max-content; padding: 16px; }
 .bracket-column h3 { margin: 0 0 16px; font-size: 14px; color: var(--result-accent); }
-.bracket-cells { display: grid; grid-template-rows: repeat(var(--slots), 74px); }
+.bracket-cells { display: grid; grid-template-rows: repeat(var(--slots), 160px); }
 .bracket-cell { position: relative; display: flex; align-items: center; padding: 8px 0; min-height: 0; }
 .bracket-column:not(:last-child) .tournament-pair::after { content: ""; position: absolute; right: -16px; top: 50%; width: 16px; border-top: 1px solid var(--result-main); }
 .bracket-column:not(:first-child) .bracket-cell::before { content: ""; position: absolute; left: -16px; top: 25%; height: 50%; border-left: 1px solid var(--result-main); }
