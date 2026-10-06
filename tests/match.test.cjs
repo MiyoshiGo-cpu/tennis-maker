@@ -37,7 +37,7 @@ function presentation(options, result) {
 
 test("結果見出しは固定seedの逆転・フルセット・ストレート・最終タイブレークと優先順に一致する", () => {
   const cases = [[1,"comeback","6-1 5-7 1-6"], [2,"straight","6-3 7-5"], [13,"fullSets","6-7(3) 6-2 1-6"],
-    [3,"finalTiebreak","6-2 7-6(5)"], [60,"savedMatchPoint","6-7(8) 7-6(4) 6-3"]];
+    [4,"finalTiebreak","5-7 6-2 6-7(7)"], [60,"savedMatchPoint","6-7(8) 7-6(4) 6-3"]];
   for (const [seed, headline, score] of cases) {
     const options = { a: entry(), b: entry(), format:3, surface:"hard", firstServer:"a", seed };
     const result = TennisMatch.simulate(options), before = copy({options,result});
@@ -49,6 +49,68 @@ test("結果見出しは固定seedの逆転・フルセット・ストレート�
   assert.equal(presentation(options,TennisMatch.simulate(options)).headline, "victory");
   options.a=entry(99);options.b=entry(1);
   assert.equal(presentation(options,TennisMatch.simulate(options)).headline, "dominant");
+});
+
+test("ストレートの最後のタイブレークは最終セット扱いにせず、1セットには専用の見出しを使う", () => {
+  const cases = [
+    {format:3,seed:3,score:"6-2 7-6(5)",headline:"straight"},
+    {format:1,seed:9,score:"6-7(5)",headline:"singleTiebreak"},
+    {format:3,seed:4,score:"5-7 6-2 6-7(7)",headline:"finalTiebreak"},
+    {format:5,seed:27,score:"6-7(2) 3-6 7-5 7-6(3) 6-7(7)",headline:"finalTiebreak"}
+  ];
+  for (const {format,seed,score,headline} of cases) {
+    const options={a:entry(),b:entry(),format,firstServer:"a",seed},result=TennisMatch.simulate(options);
+    assert.equal(result.scoreText,score);
+    assert.equal(presentation(options,result).headline,headline);
+  }
+});
+
+test("実況スコアは公開済みポイントだけで組み立て、次のサーバー・AD・タイブレーク・セット切替を示す", () => {
+  let sawAdvantage=false, sawTiebreak=false, sawSetReset=false;
+  for (const [format,seed] of [[3,4],[5,27]]) {
+    const result=TennisMatch.simulate({a:entry(),b:entry(),format,firstServer:"a",seed});
+    const before=copy(result);
+    presentationContext.result=result;presentationContext.format=format;
+    for (let shown=0;shown<=result.points.length;shown++) {
+      presentationContext.shown=shown;
+      const frame=copy(vm.runInContext("matchReplayFrame(result,shown,format)",presentationContext));
+      const previous=result.points[shown-1],next=result.points[shown];
+      assert.equal(frame.server,next?.server||null);
+      assert.equal(frame.columns.length,format);
+      if(!shown) {
+        assert.deepEqual(frame.pointText,{a:"0",b:"0"});
+        assert.deepEqual([frame.columns[0].a,frame.columns[0].b],[0,0]);
+        assert.ok(frame.columns.slice(1).every(column=>column.a==="−"&&column.b==="−"));
+      } else if(previous.matchEnd) {
+        assert.equal(frame.finished,true);assert.equal(frame.server,null);
+        result.sets.forEach((set,index)=>assert.deepEqual([frame.columns[index].a,frame.columns[index].b],[set.a,set.b]));
+      } else {
+        assert.equal(frame.finished,false);
+        if(previous.gameEnd)assert.deepEqual(frame.pointText,{a:"0",b:"0"});
+        else assert.deepEqual(frame.pointText,previous.score.pointText);
+        if(previous.setEnd) {
+          const completed=previous.score.sets.a+previous.score.sets.b;
+          assert.deepEqual([frame.columns[completed].a,frame.columns[completed].b],[0,0]);
+          sawSetReset=true;
+        }
+      }
+      if(Object.values(frame.pointText).includes("AD"))sawAdvantage=true;
+      if(frame.tiebreak&&previous&&!previous.gameEnd){assert.equal(typeof frame.pointText.a,"number");sawTiebreak=true;}
+    }
+    assert.deepEqual(result,before);
+  }
+  assert.ok(sawAdvantage&&sawTiebreak&&sawSetReset);
+});
+
+test("結果PNGのファイル名は2人の名前を使い、禁止文字と末尾のドットを置換する", () => {
+  for(const [a,b,expected]of [
+    ["山田 太郎","佐藤健","tennis-match_山田 太郎_vs_佐藤健.png"],
+    [" 山/田:太郎. ","佐藤*健?","tennis-match_山_田_太郎__vs_佐藤_健_.png"],
+    ["","","tennis-match_名無しの選手_vs_名無しの選手.png"]
+  ]){
+    presentationContext.options={a:{player:{name:a}},b:{player:{name:b}}};
+    assert.equal(vm.runInContext("matchImageFileName(options)",presentationContext),expected);
+  }
 });
 
 test("タグは総合力400差・6-0・タイブレーク2回・エース10本・ノーブレークを優先順で最大2つにする", () => {

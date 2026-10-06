@@ -457,8 +457,9 @@ function matchPresentation(options, result) {
     };
   }
   const first = result.sets[0], last = result.sets[result.sets.length - 1];
-  const headline = last.tiebreak ? "finalTiebreak" : saved.length ? "savedMatchPoint"
-    : first[winner] < first[loser] ? "comeback" : format > 1 && result.sets.length === format ? "fullSets"
+  const fullSets = format > 1 && result.sets.length === format;
+  const headline = fullSets && last.tiebreak ? "finalTiebreak" : format === 1 && last.tiebreak ? "singleTiebreak" : saved.length ? "savedMatchPoint"
+    : first[winner] < first[loser] ? "comeback" : fullSets ? "fullSets"
       : result.sets.every(set => set[loser] <= config.limits.dominantGames) ? "dominant" : format === 1 ? "victory" : "straight";
   const tiebreaks = result.sets.filter(set => set.tiebreak).length;
   const scores = Object.fromEntries(["a", "b"].map(side => [side, calculateScore(normalizeCard(options[side].card)).value]));
@@ -487,6 +488,34 @@ function matchPresentation(options, result) {
   return { headline, tags: tags.slice(0, config.limits.tags), moments: moments.slice(0, config.limits.highlights), stats };
 }
 
+function matchReplayFrame(result, shown, format) {
+  shown = Math.max(0, Math.min(result.points.length, Math.floor(shown)));
+  const previous = result.points[shown - 1], next = result.points[shown];
+  const finished = Boolean(previous?.matchEnd);
+  const completed = previous ? previous.score.sets.a + previous.score.sets.b : 0;
+  const currentGames = !previous || previous.setEnd ? { a: 0, b: 0 } : previous.score.games;
+  const columns = Array.from({ length: format }, (_, index) => {
+    if (index < completed) return { ...result.sets[index], tiebreak: result.sets[index].tiebreak ? { ...result.sets[index].tiebreak } : null };
+    if (index === completed && !finished) return { ...currentGames, active: true };
+    return { a: DATA.text.missingScore, b: DATA.text.missingScore };
+  });
+  const zero = DATA.match.rules.pointLabels[0];
+  const pointText = finished ? { a: DATA.text.missingScore, b: DATA.text.missingScore }
+    : !previous || previous.gameEnd ? { a: zero, b: zero } : { ...previous.score.pointText };
+  return { columns, pointText, server: next?.server || null, finished,
+    set: next?.set || previous?.set, game: next?.game || previous?.game, tiebreak: Boolean(next?.tiebreak) };
+}
+
+function imageNamePart(name) {
+  return name.trim().replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, "_").replace(/[. ]+$/g, "_");
+}
+
+function matchImageFileName(options) {
+  const a = imageNamePart(options.a.player.name || DATA.text.anonymous);
+  const b = imageNamePart(options.b.player.name || DATA.text.anonymous);
+  return DATA.match.export.fileLabel.replace("{a}", a).replace("{b}", b);
+}
+
 (function () {
   let toastTimer;
   let world = WORLD_STORAGE.load(() => toast(DATA.text.storageError));
@@ -497,6 +526,7 @@ function matchPresentation(options, result) {
   let exporting = false;
   let imageUrl;
   let matchRun = null;
+  let playbackTimer;
   const form = document.getElementById("player-form");
   const card = document.getElementById("player-card");
   const dialog = document.getElementById("image-dialog");
@@ -938,11 +968,170 @@ function matchPresentation(options, result) {
     if (!entries) return;
     // 結果はメモリだけに保持し、保存するのは対戦設定のみ。
     const options = JSON.parse(JSON.stringify(entries));
-    matchRun = { setup: JSON.parse(JSON.stringify(setup)), options, result: TennisMatch.simulate(options) };
+    clearTimeout(playbackTimer);
+    matchRun = { setup: JSON.parse(JSON.stringify(setup)), options, result: TennisMatch.simulate(options),
+      phase: "replay", playback: { shown: 0, logShown: 0, paused: false, speed: DATA.match.playback.initialSpeed } };
     world.ui.matchSetup = matchRun.setup;
     persistWorld();
     if (location.hash === "#/match/play") renderRoute();
     else location.hash = "#/match/play";
+  }
+
+  function applyMatchTheme() {
+    Object.entries(DATA.match.themes.default).forEach(([key, value]) => document.body.style.setProperty("--result-" + key, value));
+  }
+
+  function showMatchResult() {
+    clearTimeout(playbackTimer);
+    matchRun.phase = "result";
+    renderRoute();
+  }
+
+  function schedulePlayback() {
+    clearTimeout(playbackTimer);
+    const run = matchRun;
+    if (!run || run.phase !== "replay" || run.playback.paused || location.hash !== "#/match/play") return;
+    const finished = run.playback.shown === run.result.points.length;
+    playbackTimer = setTimeout(() => {
+      if (matchRun !== run || location.hash !== "#/match/play" || run.playback.paused) return;
+      if (finished) showMatchResult();
+      else {
+        run.playback.shown++;
+        appendMatchCommentary();
+        updateReplayBoard();
+        schedulePlayback();
+      }
+    }, finished ? DATA.match.playback.resultDelay : DATA.match.playback.pointInterval / run.playback.speed);
+  }
+
+  function commentaryLine(item) {
+    const line = element("li", "commentary-line commentary-" + item.type, item.text);
+    line.dataset.point = item.pointIndex;
+    return line;
+  }
+
+  function appendMatchCommentary() {
+    const { result, playback } = matchRun;
+    const list = document.getElementById("match-commentary");
+    const batch = document.createDocumentFragment();
+    while (playback.logShown < result.log.length && result.log[playback.logShown].pointIndex < playback.shown) {
+      batch.append(commentaryLine(result.log[playback.logShown++]));
+    }
+    list.append(batch);
+    list.lastElementChild?.scrollIntoView({ block: "end", behavior: resultMotion.matches ? "instant" : "smooth" });
+  }
+
+  function updateReplayBoard() {
+    const { result, playback, options } = matchRun;
+    const frame = matchReplayFrame(result, playback.shown, options.format);
+    const config = DATA.match.playback;
+    const phase = document.getElementById("match-replay-phase");
+    phase.textContent = frame.finished ? config.finished : message(frame.tiebreak ? config.tiebreak : config.phase, frame);
+    document.querySelectorAll("#match-replay-scoreboard tbody tr").forEach(row => {
+      const id = row.dataset.side, other = id === "a" ? "b" : "a";
+      const server = row.querySelector(".replay-server");
+      server.textContent = frame.server === id ? config.serverMark : "";
+      server.setAttribute("aria-label", frame.server === id ? config.server : "");
+      row.querySelectorAll(".replay-set").forEach((cell, index) => {
+        const set = frame.columns[index];
+        cell.replaceChildren(document.createTextNode(String(set[id])));
+        if (set.tiebreak && set[id] < set[other]) cell.append(element("sup", "", set.tiebreak[id]));
+        cell.classList.toggle("set-lost", Boolean(set.tiebreak !== undefined && !set.active && set[id] < set[other]));
+        cell.classList.toggle("replay-active-set", Boolean(set.active));
+      });
+      row.querySelector(".replay-points").textContent = frame.pointText[id];
+    });
+    const toggle = document.getElementById("match-pause");
+    toggle.textContent = playback.paused ? config.resume : config.pause;
+    toggle.disabled = frame.finished;
+    document.getElementById("match-speed").disabled = frame.finished;
+  }
+
+  function renderMatchReplay() {
+    applyMatchTheme();
+    const screen = document.getElementById("match-replay-screen");
+    const { options, result, playback } = matchRun;
+    const config = DATA.match.playback;
+    screen.replaceChildren();
+    const panel = element("div", "match-replay-panel");
+    const phase = element("h2", "", "");
+    phase.id = "match-replay-phase";
+    const board = element("table", "replay-scoreboard");
+    board.id = "match-replay-scoreboard";
+    board.setAttribute("aria-label", DATA.match.presentation.scoreboard);
+    const head = element("thead"), header = element("tr");
+    header.append(element("th", "", DATA.match.ui.player));
+    for (let set = 1; set <= options.format; set++) header.append(element("th", "", message(DATA.match.presentation.setLabel, { set })));
+    header.append(element("th", "replay-points-heading", config.points));
+    Array.from(header.children).forEach(cell => { cell.scope = "col"; });
+    head.append(header);
+    const body = element("tbody");
+    DATA.match.ui.sides.forEach(({ id }) => {
+      const row = element("tr");
+      row.dataset.side = id;
+      const identity = element("th");
+      identity.scope = "row";
+      identity.append(element("span", "replay-server"), element("strong", "", options[id].player.name || DATA.text.anonymous), element("span", "replay-series", seriesName(options[id].seriesId)));
+      row.append(identity);
+      for (let set = 0; set < options.format; set++) row.append(element("td", "replay-set"));
+      row.append(element("td", "replay-points"));
+      body.append(row);
+    });
+    board.append(head, body);
+    const controls = element("div", "replay-controls");
+    const toggle = element("button", "button secondary");
+    toggle.id = "match-pause";
+    toggle.type = "button";
+    toggle.addEventListener("click", () => {
+      playback.paused = !playback.paused;
+      updateReplayBoard();
+      schedulePlayback();
+    });
+    const speed = matchSelect("match-speed", config.speed, config.speeds, playback.speed);
+    speed.select.addEventListener("change", () => {
+      playback.speed = Number(speed.select.value);
+      schedulePlayback();
+    });
+    const skip = element("button", "button primary", config.skip);
+    skip.type = "button";
+    skip.id = "match-skip";
+    skip.addEventListener("click", showMatchResult);
+    controls.append(toggle, speed.field, skip);
+    panel.append(phase, board, controls);
+    const commentary = element("section", "match-commentary-panel");
+    commentary.append(element("h3", "", config.title));
+    const list = element("ol", "match-commentary");
+    list.id = "match-commentary";
+    const batch = document.createDocumentFragment();
+    result.log.slice(0, playback.logShown).forEach(item => batch.append(commentaryLine(item)));
+    list.append(batch);
+    commentary.append(list);
+    screen.append(panel, commentary);
+    updateReplayBoard();
+    schedulePlayback();
+  }
+
+  function resultStatRow(item, result) {
+    const ui = DATA.match.ui;
+    const row = element("div", "result-stat");
+    row.dataset.stat = item.field;
+    const values = element("div", "result-stat-values");
+    const bar = element("div", "result-stat-bar");
+    bar.setAttribute("aria-hidden", "true");
+    bar.style.setProperty("--a-share", item.share * 100 + "%");
+    const labels = {};
+    ui.sides.forEach(({ id }) => {
+      const numbers = result.stats[id];
+      labels[id] = numbers[item.field].toLocaleString("ja-JP");
+      if (item.percent) labels[id] = numbers[item.total] ? numbers[item.field].toLocaleString("ja-JP", { style: "percent", minimumFractionDigits: ui.percentDigits, maximumFractionDigits: ui.percentDigits }) : DATA.text.missingScore;
+      else if (item.total) labels[id] = message(ui.fraction, { won: labels[id], total: numbers[item.total].toLocaleString("ja-JP") });
+      const better = item.better === id ? " stat-better" : "";
+      values.append(element("strong", better, labels[id]));
+      bar.append(element("span", "stat-side-" + id + better));
+    });
+    row.append(element("h4", "", item.name), values, bar);
+    row.setAttribute("aria-label", message(DATA.match.presentation.statComparison, { name: item.name, ...labels }));
+    return row;
   }
 
   function renderMatchResult() {
@@ -955,7 +1144,7 @@ function matchPresentation(options, result) {
     const timing = config.animation;
     const { options, result } = matchRun;
     const presentation = matchPresentation(options, result);
-    Object.entries(DATA.match.themes.default).forEach(([key, value]) => document.body.style.setProperty("--result-" + key, value));
+    applyMatchTheme();
     Object.entries(timing).forEach(([key, value]) => screen.style.setProperty("--time-" + key, value + "s"));
     const reveal = (node, delay) => {
       node.classList.add("result-reveal");
@@ -1042,34 +1231,18 @@ function matchPresentation(options, result) {
     const sides = element("div", "result-stat-names");
     ui.sides.forEach(({ id }) => sides.append(element("span", "", options[id].player.name || DATA.text.anonymous)));
     stats.append(sides);
-    presentation.stats.forEach(item => {
-      const row = element("div", "result-stat");
-      row.dataset.stat = item.field;
-      const values = element("div", "result-stat-values");
-      const bar = element("div", "result-stat-bar");
-      bar.setAttribute("aria-hidden", "true");
-      bar.style.setProperty("--a-share", item.share * 100 + "%");
-      const labels = {};
-      ui.sides.forEach(({ id }) => {
-        const numbers = result.stats[id];
-        labels[id] = numbers[item.field].toLocaleString("ja-JP");
-        if (item.percent) labels[id] = numbers[item.total] ? numbers[item.field].toLocaleString("ja-JP", { style: "percent", minimumFractionDigits: ui.percentDigits, maximumFractionDigits: ui.percentDigits }) : DATA.text.missingScore;
-        else if (item.total) labels[id] = message(ui.fraction, { won: labels[id], total: numbers[item.total].toLocaleString("ja-JP") });
-        const better = item.better === id ? " stat-better" : "";
-        values.append(element("strong", "" + better, labels[id]));
-        bar.append(element("span", "stat-side-" + id + better));
-      });
-      row.append(element("h4", "", item.name), values, bar);
-      row.setAttribute("aria-label", message(config.statComparison, { name: item.name, ...labels }));
-      stats.append(row);
-    });
+    presentation.stats.forEach(item => stats.append(resultStatRow(item, result)));
     const actions = reveal(element("div", "match-result-actions"), sectionsAt + 2 * timing.section);
     const again = element("button", "button primary", ui.again);
     again.type = "button";
     again.addEventListener("click", () => runMatch(matchRun.setup));
     const change = element("a", "button secondary", ui.changeSetup);
     change.href = "#/match";
-    actions.append(again, change);
+    const save = element("button", "button secondary", DATA.match.export.label);
+    save.type = "button";
+    save.id = "save-match-image";
+    save.addEventListener("click", exportMatchImage);
+    actions.append(again, change, save);
     const confetti = element("div", "result-confetti");
     confetti.setAttribute("aria-hidden", "true");
     for (let index = 0; index < timing.particles; index++) {
@@ -1103,18 +1276,22 @@ function matchPresentation(options, result) {
   });
 
   function renderRoute() {
+    clearTimeout(playbackTimer);
     const route = resolveEditRoute(world, location.hash);
     const detail = resolvePlayerRoute(world, location.hash);
     if (location.hash === "#/match/play" && !matchRun) history.replaceState(null, "", "#/match");
     const setup = location.hash === "#/match";
     const result = location.hash === "#/match/play";
+    const replay = result && matchRun.phase === "replay";
+    if (!result && matchRun?.phase === "replay" && matchRun.playback.shown < matchRun.result.points.length) matchRun.playback.paused = true;
     document.body.classList.toggle("result-page", result);
     if (!route && !detail && !setup && !result && location.hash !== "#/") history.replaceState(null, "", "#/");
     document.getElementById("list-screen").hidden = Boolean(route || detail || setup || result);
     document.getElementById("list-actions").hidden = Boolean(route || detail || setup || result);
     document.getElementById("player-screen").hidden = !detail;
     document.getElementById("match-setup-screen").hidden = !setup;
-    document.getElementById("match-result-screen").hidden = !result;
+    document.getElementById("match-result-screen").hidden = !result || replay;
+    document.getElementById("match-replay-screen").hidden = !replay;
     document.getElementById("editor-screen").hidden = !route;
     document.getElementById("editor-actions").hidden = !route;
     if (route) {
@@ -1131,6 +1308,7 @@ function matchPresentation(options, result) {
       editingSeriesId = undefined;
       if (detail) renderPlayer(detail);
       else if (setup) renderMatchSetup();
+      else if (replay) renderMatchReplay();
       else if (result) renderMatchResult();
       else renderList();
     }
@@ -1566,14 +1744,15 @@ function matchPresentation(options, result) {
   });
 
   function fileName(name, seriesId) {
-    const safeName = name.trim().replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, "_").replace(/[. ]+$/g, "_");
+    const safeName = imageNamePart(name);
     return "tennis-card" + (safeName ? "_" + safeName : "") + "_" + seriesName(seriesId, true) + ".png";
   }
 
-  function showImage(blob, filename) {
+  function showImage(blob, filename, alt = DATA.text.imageAlt) {
     if (imageUrl) URL.revokeObjectURL(imageUrl);
     imageUrl = URL.createObjectURL(blob);
     document.getElementById("export-image").src = imageUrl;
+    document.getElementById("export-image").alt = alt;
     const download = document.getElementById("download-image");
     download.href = imageUrl;
     download.download = filename;
@@ -1602,19 +1781,19 @@ function matchPresentation(options, result) {
     }));
   }
 
-  async function exportImage() {
-    if (exporting || !player) return;
+  async function exportDomImage(source, filename, options) {
+    if (exporting) return;
     exporting = true;
-    saveButtons.forEach(button => { button.disabled = true; button.textContent = DATA.text.saving; });
-    // 出力中の入力やスクロールに影響されないよう、現在のカードを固定して撮影する。
-    const snapshot = card.cloneNode(true);
+    const { buttons, label, width, background, alt } = options;
+    buttons.forEach(button => { button.disabled = true; button.textContent = DATA.text.saving; });
+    // 共有までの待機中に入力・画面が変わっても、クリック時点の内容を出力する。
+    const snapshot = source.cloneNode(true);
     snapshot.removeAttribute("id");
     const holder = element("div", "export-holder");
     holder.setAttribute("aria-hidden", "true");
-    holder.style.width = card.getBoundingClientRect().width + "px";
+    holder.style.width = width + "px";
     holder.append(snapshot);
     document.body.append(holder);
-    const filename = fileName(player.name, editingSeriesId);
     try {
       await document.fonts.ready;
       await Promise.all(Array.from(snapshot.querySelectorAll("img")).map(image => image.decode()));
@@ -1622,7 +1801,7 @@ function matchPresentation(options, result) {
       if (location.protocol === "file:") await inlineExportIcons(snapshot);
       async function renderPng() {
         const canvas = await html2canvas(snapshot, {
-          scale: 2, backgroundColor: DATA.colors.paper, logging: false, scrollX: 0, scrollY: 0
+          scale: 2, backgroundColor: background, logging: false, scrollX: 0, scrollY: 0
         });
         return new Promise((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error("PNG unavailable")), "image/png"));
       }
@@ -1644,14 +1823,44 @@ function matchPresentation(options, result) {
           // 共有権限・ユーザー操作の有効期限などで失敗した場合は画像を渡す。
         }
       }
-      showImage(blob, filename);
+      showImage(blob, filename, alt);
     } catch (_) {
       toast(DATA.text.exportError);
     } finally {
       holder.remove();
       exporting = false;
-      saveButtons.forEach(button => { button.disabled = false; button.textContent = DATA.text.saveImage; });
+      buttons.forEach(button => { button.disabled = false; button.textContent = label; });
     }
+  }
+
+  function exportImage() {
+    if (!player) return;
+    return exportDomImage(card, fileName(player.name, editingSeriesId), {
+      buttons: saveButtons, label: DATA.text.saveImage, width: card.getBoundingClientRect().width,
+      background: DATA.colors.paper, alt: DATA.text.imageAlt
+    });
+  }
+
+  function exportMatchImage() {
+    const screen = document.getElementById("match-result-screen");
+    const snapshot = element("article", "result-content result-export-card result-final");
+    const config = DATA.match.export;
+    const theme = getComputedStyle(document.body);
+    Object.keys(DATA.match.themes.default).forEach(key => snapshot.style.setProperty("--result-" + key, theme.getPropertyValue("--result-" + key)));
+    [".result-contenders", ".result-heading", ".result-board-panel"].forEach(selector => snapshot.append(screen.querySelector(selector).cloneNode(true)));
+    const stats = element("section", "result-stats");
+    stats.append(element("h3", "", DATA.match.ui.stats), screen.querySelector(".result-stat-names").cloneNode(true));
+    config.stats.forEach(field => {
+      const definition = DATA.match.ui.statRows.find(item => item.field === field);
+      const a = matchRun.result.stats.a[field], b = matchRun.result.stats.b[field];
+      stats.append(resultStatRow({ ...definition, share: a + b ? a / (a + b) : config.zeroShare,
+        better: a === b ? null : (definition.lowerBetter ? a < b : a > b) ? "a" : "b" }, matchRun.result));
+    });
+    snapshot.append(stats);
+    return exportDomImage(snapshot, matchImageFileName(matchRun.options), {
+      buttons: [document.getElementById("save-match-image")], label: config.label, width: config.width,
+      background: theme.getPropertyValue("--result-bg-top").trim(), alt: config.imageAlt
+    });
   }
 
   saveButtons.forEach(button => button.addEventListener("click", exportImage));

@@ -211,7 +211,7 @@ const DATA = {
       highlights: "試合の山場", statComparison: "{name}：{a} 対 {b}",
       limits: { tags: 2, highlights: 3, upset: 400, aceTag: 10, tiebreakTag: 2, deuce: 3, setAces: 4, dominantGames: 1 },
       headlines: {
-        finalTiebreak: "最終セットタイブレークの死闘を制す", savedMatchPoint: "マッチポイントをしのいで大逆転",
+        finalTiebreak: "最終セットタイブレークの死闘を制す", singleTiebreak: "タイブレークの死闘を制す", savedMatchPoint: "マッチポイントをしのいで大逆転",
         comeback: "逆転勝利", fullSets: "フルセットの激闘を制す", dominant: "完勝", straight: "ストレート勝ち", victory: "勝利"
       },
       tags: { upset: "大金星", bagel: "ベーグル", tiebreaks: "タイブレーク{count}回", aces: "エース{count}本", noBreak: "ノーブレーク" },
@@ -224,6 +224,18 @@ const DATA = {
       },
       animation: { cards: 0.6, versus: 0.6, decision: 1.2, badge: 1.5, headline: 1.8, column: 0.25, reveal: 0.3, section: 0.15, confetti: 2, particles: 32 },
       particles: { spread: 37, drift: 20, driftStep: 8, variations: 7, stagger: 0.04, groups: 4 }
+    },
+    playback: {
+      title: "試合の実況", pause: "一時停止", resume: "再生", speed: "速度", skip: "結果まで飛ばす",
+      points: "ポイント", server: "サーブ中", serverMark: "●", phase: "第{set}セット第{game}ゲーム",
+      tiebreak: "第{set}セット タイブレーク", finished: "ゲームセット！",
+      pointInterval: 800, resultDelay: 1000, initialSpeed: 1,
+      speeds: [{ id: 1, name: "1倍" }, { id: 2, name: "2倍" }, { id: 4, name: "4倍" }]
+    },
+    export: {
+      label: "結果を画像で保存", imageAlt: "試合結果の画像", width: 360, zeroShare: 0.5,
+      fileLabel: "tennis-match_{a}_vs_{b}.png",
+      stats: ["aces", "doubleFaults", "winners", "errors", "breakPointsWon"]
     },
     ui: {
       setup: "対戦設定", result: "試合結果", player: "選手", series: "シリーズ", format: "試合形式",
