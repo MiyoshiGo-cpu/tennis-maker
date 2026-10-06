@@ -320,7 +320,8 @@ const DATA = {
       pass: ["{name}、{shot}でネットを破る！", "{name}の{shot}が{opponent}を抜いた！", "{name}、見事な{shot}！ ネットの相手をかわした。"]
     },
     lines: {
-      pressure: "{name}、{pressure}。", game: "ゲーム {name}。{score}",
+      start: "{name}のサーブで試合開始", pressure: "{name}、{pressure}。",
+      game: "ゲーム {name}。{score}", gameFinishedSet: "ゲーム {name}。",
       gameLead: "{name}が {lead}-{behind} とリード", gameTie: "{games}-{games} のタイ",
       set: "第{set}セットは {name}が {won}-{lost} で獲得。", match: "ゲームセット！ {name}の勝利",
       deuce: "デュース！", deuceAgain: "再びデュース", advantage: "アドバンテージ {name}"

@@ -160,7 +160,7 @@ test("固定seedの実況は連続するひな形を避け、優先ポイント�
         covered.add(tied?"gameTie":"gameLead"+leader);
         if(!tied&&leader!==point.winner)covered.add("trailingGameWinner");
         const count=tied?text(DATA.match.lines.gameTie,{games:games.a}):text(DATA.match.lines.gameLead,{name:names[leader],lead:games[leader],behind:games[opposite(leader)]});
-        assert.equal(lines.find(line=>line.type==="game").text,text(DATA.match.lines.game,{name:names[point.winner],score:count}));
+        assert.equal(lines.find(line=>line.type==="game").text,text(point.setEnd?DATA.match.lines.gameFinishedSet:DATA.match.lines.game,{name:names[point.winner],score:count}));
         deuces=0;
       }
       if(point.setEnd){
@@ -171,6 +171,26 @@ test("固定seedの実況は連続するひな形を避け、優先ポイント�
     }
   }
   for(const condition of ["match","set","break","deuce","deuceAgain","advantage","suppressedAdvantage","gameTie","gameLeada","gameLeadb","trailingGameWinner","setWinnera","setWinnerb"])assert.ok(covered.has(condition),condition);
+});
+
+test("試合開始行は最初のサーバーを示し、セット決着ゲームはゲーム宣言の直後にセット行を出す", () => {
+  const covered=new Set();
+  for(const format of [1,3,5])for(const firstServer of ["a","b","random"]) {
+    const a=entry(),b=entry();a.player.name="山田 太郎";b.player.name="佐藤 健";
+    const result=TennisMatch.simulate({a,b,format,firstServer,seed:4});
+    const names={a:a.player.name,b:b.player.name},server=result.points[0].server;
+    assert.deepEqual(result.log[0],{type:"start",text:names[server]+"のサーブで試合開始",pointIndex:-1});
+    assert.equal(result.log.filter(line=>line.type==="start").length,1);
+    if(firstServer!=="random")assert.equal(server,firstServer);
+    for(const point of result.points.filter(point=>point.setEnd)) {
+      const index=result.log.findIndex(line=>line.type==="game"&&line.pointIndex===result.points.indexOf(point));
+      assert.equal(result.log[index].text,"ゲーム "+names[point.winner]+"。");
+      assert.equal(result.log[index+1].type,"set");
+      assert.equal(result.log[index+1].pointIndex,result.log[index].pointIndex);
+      covered.add(point.tiebreak?"tiebreak":"normal");
+    }
+  }
+  assert.deepEqual([...covered].sort(),["normal","tiebreak"]);
 });
 
 test("タグは総合力400差・6-0・タイブレーク2回・エース10本・ノーブレークを優先順で最大2つにする", () => {

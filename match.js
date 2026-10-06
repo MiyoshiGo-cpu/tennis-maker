@@ -185,6 +185,8 @@
     let tiebreakServer = null;
     let previousTemplate = null, deuces = 0;
     const line = (type, text, pointIndex) => result.log.push({ type, text, pointIndex });
+    // 最初のポイントより前に表示する開始行。
+    line("start", formatText(config.lines.start, { name: names[state.server] }), -1);
     while (!result.winner) {
       const server = state.server, receiver = other(server), index = result.points.length;
       const pressureByPlayer = pressures(state), pressure = [...new Set(keys.flatMap(key => pressureByPlayer[key]))];
@@ -236,8 +238,8 @@
         const score = state.games.a === state.games.b
           ? formatText(config.lines.gameTie, { games: state.games.a })
           : formatText(config.lines.gameLead, { name: names[leader], lead: state.games[leader], behind: state.games[other(leader)] });
-        line("game", formatText(config.lines.game, { name: names[winner], score }), index);
         setEnd = wasTiebreak || (state.games[winner] >= rules.setGames && state.games[winner] - state.games[loser] >= rules.lead);
+        line("game", formatText(setEnd ? config.lines.gameFinishedSet : config.lines.game, { name: names[winner], score }), index);
         if (setEnd) {
           const set = { ...state.games };
           if (wasTiebreak) set.tiebreak = { ...state.points };

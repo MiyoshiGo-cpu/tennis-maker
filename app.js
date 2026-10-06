@@ -1107,6 +1107,7 @@ function matchImageFileName(options) {
     list.append(batch);
     commentary.append(list);
     screen.append(panel, commentary);
+    appendMatchCommentary();
     updateReplayBoard();
     schedulePlayback();
   }
