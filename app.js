@@ -431,6 +431,64 @@ function tournamentChampionPath(tournament) {
   }));
 }
 
+function tournamentStanding(tournament, playerId) {
+  const labels = DATA.tournament.standings;
+  if (tournament.status === "draft") return DATA.tournament.statuses.draft;
+  if (tournament.status === "done" && tournament.championId === playerId) return labels.champion;
+  const lost = tournament.matches.find(match => match.status === "done" && match.result && (match.a === playerId || match.b === playerId) && tournamentWinner(match) !== playerId);
+  if (!lost) return DATA.tournament.statuses[tournament.status];
+  const remaining = tournament.slots.length / 2 ** (lost.round - 1);
+  if (remaining === 2) return labels.runnerUp;
+  return lost.round === 1 ? labels.firstRound : labels.best.replace("{count}", remaining);
+}
+
+function playerTournamentRecords(world, playerId) {
+  const records = { titles: 0, runnerUps: 0, wins: 0, losses: 0, tournaments: [] };
+  world.tournaments.filter(tournament => tournament.entrants.some(entrant => entrant.playerId === playerId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).forEach(tournament => {
+      const standing = tournamentStanding(tournament, playerId);
+      records.tournaments.push({ tournament, standing });
+      if (tournament.status === "done") {
+        if (tournament.championId === playerId) records.titles++;
+        const final = tournament.matches.at(-1);
+        if (final?.result && (final.a === playerId || final.b === playerId) && tournamentWinner(final) !== playerId) records.runnerUps++;
+      }
+      tournament.matches.filter(match => match.status === "done" && match.result && (match.a === playerId || match.b === playerId)).forEach(match => {
+        if (tournamentWinner(match) === playerId) records.wins++;
+        else records.losses++;
+      });
+    });
+  return records;
+}
+
+function tournamentChampions(world, name) {
+  return world.tournaments.filter(tournament => tournament.status === "done" && tournament.name === name && tournament.snapshot[tournament.championId])
+    .sort((a, b) => compareSeries(b.seriesId, a.seriesId) || b.createdAt.localeCompare(a.createdAt));
+}
+
+function isSeriesChampion(world, playerId, seriesId) {
+  return world.tournaments.some(tournament => tournament.status === "done" && tournament.seriesId === seriesId && tournament.championId === playerId);
+}
+
+function nextTournamentSeries(tournament) {
+  return shiftSeries(tournament.seriesId, 1);
+}
+
+function repeatWorldTournament(world, tournament) {
+  if (tournament.status !== "done") return null;
+  const seriesId = nextTournamentSeries(tournament);
+  const playerIds = new Set(tournament.entrants.map(entrant => entrant.playerId));
+  const entrants = tournamentCandidates(world, seriesId).filter(player => playerIds.has(player.id)).map(player => ({ playerId: player.id }));
+  const settings = Object.fromEntries(["name", "surface", "format", "finalFormat", "theme"].map(key => [key, tournament[key]]));
+  const next = normalizeTournament({ ...settings, seriesId, status: "draft", entrants }, world, new Set(world.tournaments.map(item => item.id)));
+  if (compareSeries(seriesId, world.latestSeriesId) > 0) {
+    world.latestSeriesId = seriesId;
+    world.ui.seriesId = seriesId;
+  }
+  world.tournaments.push(next);
+  return next;
+}
+
 function resolveTournamentRoute(world, hash) {
   if (hash === "#/tournaments") return { type: "list" };
   if (hash === "#/tournaments/new") return { type: "edit", tournament: null };
@@ -1019,7 +1077,15 @@ function matchImageFileName(options) {
       if (current) row.style.setProperty("--surface", DATA.basic.surface.find(surface => surface.id === current.surface).color);
       else row.classList.add("missing-card");
       const identity = element("div", "list-identity");
-      identity.append(element("strong", "list-name", item.name || DATA.text.anonymous));
+      const name = element("div", "list-name-line");
+      name.append(element("strong", "list-name", item.name || DATA.text.anonymous));
+      if (isSeriesChampion(world, item.id, world.ui.seriesId)) {
+        const cup = svgElement("svg", { viewBox: "0 0 24 24", width: 18, height: 18, class: "list-trophy", role: "img", "aria-label": DATA.tournament.ui.seriesChampion });
+        cup.append(svgElement("path", { d: "M7 4H17V9C17 13 15 15 12 15S7 13 7 9Z M7 5H3V8C3 11 5 13 8 13 M17 5H21V8C21 11 19 13 16 13 M12 15V20 M8 21H16",
+          fill: "none", stroke: DATA.tournament.records.cupColor, "stroke-width": 1.7, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+        name.append(cup);
+      }
+      identity.append(name);
       if (current?.nickname) identity.append(element("span", "list-nickname", current.nickname));
       if (current) row.append(identity, cardIcons(current), cardOverall(current));
       else row.append(identity, element("span", "", ""), element("strong", "list-score", DATA.text.missingScore));
@@ -1170,7 +1236,29 @@ function matchImageFileName(options) {
       persistWorld();
       location.hash = "#/match";
     });
-    screen.append(back, identity, match, historyPanel, timeline, deletePlayerButton(entity));
+    screen.append(back, identity, match, historyPanel, timeline, renderPlayerTournamentRecords(entity), deletePlayerButton(entity));
+  }
+
+  function renderPlayerTournamentRecords(entity) {
+    const ui = DATA.tournament.ui, records = playerTournamentRecords(world, entity.id);
+    const panel = element("section", "detail-panel tournament-records");
+    panel.append(element("h3", "", ui.records));
+    const totals = element("dl", "record-totals");
+    [[ui.titles, message(ui.titleCount, { count: records.titles.toLocaleString("ja-JP") })],
+      [ui.runnerUps, message(ui.titleCount, { count: records.runnerUps.toLocaleString("ja-JP") })],
+      [ui.career, message(ui.winLoss, { wins: records.wins.toLocaleString("ja-JP"), losses: records.losses.toLocaleString("ja-JP") })]].forEach(([label, value]) => {
+      const item = element("div"); item.append(element("dt", "", label), element("dd", "", value)); totals.append(item);
+    });
+    panel.append(totals);
+    const list = element("ul", "record-list");
+    records.tournaments.forEach(({ tournament, standing }) => {
+      const row = element("li"), link = element("a", "record-link"); link.href = "#/tournament/" + tournament.id;
+      const meta = element("span", "record-meta"); meta.append(element("span", "", seriesName(tournament.seriesId)), element("strong", "", standing));
+      link.append(element("strong", "", tournament.name || ui.anonymous), meta); row.append(link); list.append(row);
+    });
+    if (!records.tournaments.length) panel.append(element("p", "record-empty", ui.noRecords));
+    else panel.append(list);
+    return panel;
   }
 
   function matchSelect(id, label, options, value) {
@@ -1775,7 +1863,21 @@ function matchImageFileName(options) {
     screen.replaceChildren(tournamentLink(ui.back, "#/tournaments"), element("h2", "", tournament.name || ui.anonymous));
     screen.append(element("p", "tournament-meta", [seriesName(tournament.seriesId), DATA.basic.surface.find(item => item.id === tournament.surface).name,
       DATA.match.ui.formats.find(item => item.id === tournament.format).name, DATA.tournament.statuses[tournament.status]].join(DATA.text.separator)));
-    if (tournament.status === "done") screen.append(tournamentLink(ui.championScreen, "#/tournament/" + tournament.id + "/champion"));
+    screen.append(renderTournamentChampions(tournament));
+    if (tournament.status === "done") {
+      const actions = element("div", "management-buttons");
+      actions.append(tournamentLink(ui.championScreen, "#/tournament/" + tournament.id + "/champion"));
+      const next = element("button", "button secondary", ui.nextTournament); next.type = "button";
+      next.addEventListener("click", () => {
+        const seriesId = nextTournamentSeries(tournament);
+        if (compareSeries(seriesId, world.latestSeriesId) > 0 && !window.confirm(message(ui.nextSeriesConfirm, { series: seriesName(seriesId) }))) return;
+        const created = repeatWorldTournament(world, tournament);
+        if (!created) return;
+        persistWorld(); location.hash = "#/tournament/" + created.id + "/edit";
+        toast(message(ui.nextCreated, { series: seriesName(seriesId) }));
+      });
+      actions.append(next); screen.append(actions);
+    }
     if (tournament.status === "draft") {
       const actions = element("div", "management-buttons");
       actions.append(tournamentLink(ui.edit, "#/tournament/" + tournament.id + "/edit"));
@@ -1834,6 +1936,20 @@ function matchImageFileName(options) {
       }
       scroll.append(grid); screen.append(scroll);
     }
+  }
+
+  function renderTournamentChampions(tournament) {
+    const ui = DATA.tournament.ui, panel = element("section", "tournament-champions");
+    panel.append(element("h3", "", ui.champions));
+    const champions = tournamentChampions(world, tournament.name), list = element("ul", "record-list");
+    champions.forEach(item => {
+      const row = element("li"), link = element("a", "record-link"); link.href = "#/tournament/" + item.id;
+      link.append(element("span", "", seriesName(item.seriesId)), element("strong", "", item.snapshot[item.championId].name || DATA.text.anonymous));
+      row.append(link); list.append(row);
+    });
+    if (champions.length) panel.append(list);
+    else panel.append(element("p", "record-empty", ui.noChampions));
+    return panel;
   }
 
   function renderTournamentChampion(tournament) {

@@ -176,6 +176,9 @@ legend .common-fields { margin-left: 10px; }
 .missing-card { --surface: var(--line); color: var(--muted); }
 .list-identity { min-width: 0; overflow-wrap: anywhere; }
 .list-name { display: block; font-size: 18px; line-height: 1.5; }
+.list-name-line { display: flex; align-items: center; gap: 6px; }
+.list-name-line .list-name { min-width: 0; }
+.list-trophy { flex: 0 0 18px; width: 18px; height: 18px; }
 .list-nickname { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
 .list-icons { display: flex; gap: 8px; }
 .list-icons img { display: block; width: 28px; height: 28px; }
@@ -472,6 +475,17 @@ dialog p { font-size: 12px; }
 .champion-path li { padding: 10px 0; border-bottom: 1px solid var(--result-main); font-size: 12px; overflow-wrap: anywhere; }
 .champion-screen > .button:last-of-type { display: block; margin: 20px auto; }
 .champion-screen .result-confetti span:nth-child(even) { background: var(--result-accent); }
+.record-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 18px; }
+.record-totals dt { color: var(--muted); font-size: 11px; }
+.record-totals dd { margin: 4px 0 0; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.record-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.record-link { display: grid; gap: 4px; min-height: 64px; padding: 10px 12px; border-radius: 8px; background: var(--paper); color: var(--navy); text-decoration: none; overflow-wrap: anywhere; font-size: 13px; }
+.record-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; }
+.record-empty { font-size: 12px; color: var(--muted); }
+.tournament-champions { margin: 24px 0; }
+.tournament-champions h3 { color: var(--result-accent); font-size: 16px; }
+.tournament-champions .record-link { background: var(--result-panel); color: var(--result-text); border: 1px solid var(--result-main); grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 10px; }
+.tournament-champions .record-empty { color: var(--result-muted); }
 .bracket-scroll { max-width: 100%; min-width: 0; overflow-x: auto; border: 1px solid var(--result-main); border-radius: 8px; }
 .bracket-grid { display: grid; grid-template-columns: repeat(var(--rounds), 240px); gap: 32px; width: max-content; padding: 16px; }
 .bracket-column h3 { margin: 0 0 16px; font-size: 14px; color: var(--result-accent); }

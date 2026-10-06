@@ -357,3 +357,87 @@ test("優勝の記録はラウンド順でBYEと相手・スコアを含み、�
   context.matchId=run("t.matches.find(m=>m.result).id");assert.equal(run("resolveTournamentRoute(world,'#/tournament/'+t.id+'/match/'+matchId).type"),'match');
   assert.equal(run("resolveTournamentRoute(world,'#/tournament/'+t.id+'/match/r9-m9')"),null);
 });
+
+
+function finishedRecords(count=5,seriesId='2017-1',name='大会') {
+  progressWorld(count,{name});context.seriesId=seriesId;
+  run("world.players.forEach(p=>p.cards[seriesId]=normalizeCard(p.cards['2017-1']));world.latestSeriesId=seriesId;t.seriesId=seriesId");
+  context.recordMatch=options=>{const winner=options.a.player.id<options.b.player.id?'a':'b';return {winner,scoreText:(winner==='a'?'6-0':'0-6')+' RET',sets:[{a:winner==='a'?6:0,b:winner==='b'?6:0}],retired:winner==='a'?'b':'a',stats:{a:{aces:0},b:{aces:0}},points:[]};};
+  run('playTournamentRemaining(world,t,recordMatch)');return copy(run('t'));
+}
+
+test("選手の大会成績は優勝・準優勝・通算勝敗を結果から集計し、BYEを除きRETを数える",()=>{
+  const first=finishedRecords(5),second=finishedRecords(2,'2017-2');
+  first.id='t_first1';first.createdAt='2026-10-07T00:00:00.000Z';second.id='t_second';second.createdAt='2026-10-06T00:00:00.000Z';
+  const draft={...copy(first),id:'t_draft4',status:'draft',createdAt:'2026-10-08T00:00:00.000Z'};
+  context.raw={version:2,players:drawPlayers(5),tournaments:[second,first,draft]};run('world=normalizeWorld(raw)');
+  const champion=copy(run("playerTournamentRecords(world,'p_00001')"));
+  assert.deepEqual([champion.titles,champion.runnerUps,champion.wins,champion.losses],[2,0,3,0]);
+  assert.deepEqual(champion.tournaments.map(e=>e.tournament.id),['t_draft4','t_first1','t_second']);
+  assert.deepEqual(champion.tournaments.map(e=>e.standing),['準備中','優勝','優勝']);
+  const runner=copy(run("playerTournamentRecords(world,'p_00002')"));assert.deepEqual([runner.titles,runner.runnerUps,runner.wins,runner.losses],[0,2,1,2]);
+  assert.deepEqual(runner.tournaments.filter(e=>e.tournament.status==='done').map(e=>e.standing),['準優勝','準優勝']);
+  assert.deepEqual(copy(run("playerTournamentRecords(world,'p_missing')")),{titles:0,runnerUps:0,wins:0,losses:0,tournaments:[]});
+  const all=drawPlayers(5).map(p=>{context.playerId=p.id;return copy(run('playerTournamentRecords(world,playerId)'));});
+  assert.equal(all.reduce((total,r)=>total+r.wins,0),5);assert.equal(all.reduce((total,r)=>total+r.losses,0),5);
+  run('world=normalizeWorld(JSON.parse(JSON.stringify(world)))');assert.deepEqual(copy(run("playerTournamentRecords(world,'p_00001')")),champion);
+});
+
+test("最終成績は優勝・準優勝・ベスト4〜64・1回戦敗退になり、開催中の未敗退選手は開催中となる",()=>{
+  for(const count of [5,16,128]) {
+    const tournament=finishedRecords(count);context.recorded=tournament;run('t=recorded');
+    for(const match of tournament.matches.filter(m=>m.result)) {
+      context.playerId=match[opposite(match.result.winner)];
+      const remaining=tournament.slots.length/2**(match.round-1);
+      const expected=remaining===2?'準優勝':match.round===1?'1回戦敗退':'ベスト'+remaining;
+      assert.equal(run('tournamentStanding(t,playerId)'),expected);
+    }
+    assert.equal(run("tournamentStanding(t,'p_00001')"),'優勝');
+  }
+  progressWorld(5);run('playTournamentRound(world,t,1)');
+  assert.equal(run("tournamentStanding(t,'p_00001')"),'開催中');
+  const before=copy(run("playerTournamentRecords(world,'p_00001')"));assert.equal(before.titles,0);assert.equal(before.runnerUps,0);
+  const first=copy(run('t.matches.find(m=>m.result)'));context.playerId=first[opposite(first.result.winner)];
+  assert.equal(run('tournamentStanding(t,playerId)'),'1回戦敗退');
+  const loser=copy(run('playerTournamentRecords(world,playerId)'));assert.equal(loser.losses,1);
+});
+
+test("同名の歴代優勝者は終了した大会だけをシリーズの新しい順にし、名前編集・削除に影響されない",()=>{
+  const first=finishedRecords(2,'2017-1','同じ名前'),latest=finishedRecords(2,'2018-1','同じ名前'),middle=finishedRecords(2,'2017-2','同じ名前'),other=finishedRecords(2,'2019-1','別の名前');
+  first.id='t_history1';latest.id='t_history2';middle.id='t_history3';other.id='t_other01';
+  first.createdAt='2026-10-10T00:00:00Z';latest.createdAt='2026-10-01T00:00:00Z';
+  const live={...copy(latest),id:'t_live004',status:'live',championId:null,matches:latest.matches.map(m=>({...m,status:'pending',result:null}))};
+  const draft={...copy(latest),id:'t_draft5',status:'draft'};
+  context.raw={version:2,players:drawPlayers(2),tournaments:[other,first,live,latest,draft,middle]};run('world=normalizeWorld(raw)');
+  const history=copy(run("tournamentChampions(world,'同じ名前')"));assert.deepEqual(history.map(t=>t.id),['t_history2','t_history3','t_history1']);
+  run("world.players[0].name='編集後';world.players.map(p=>p.id).forEach(id=>deleteWorldPlayer(world,id))");
+  assert.deepEqual(copy(run("tournamentChampions(world,'同じ名前')")),history);
+  assert.deepEqual(copy(run("tournamentChampions(world,'未知の名前')")),[]);
+  assert.equal(run("isSeriesChampion(world,'p_00001','2017-1')"),true);assert.equal(run("isSeriesChampion(world,'p_00002','2017-1')"),false);
+  assert.equal(run("isSeriesChampion(world,'p_00001','2019-2')"),false);
+});
+
+test("次シリーズの大会は設定を引き継ぎ、該当カードのある元出場選手だけを選び、元大会を変えない",()=>{
+  const original=finishedRecords(5,'2017-2','引き継ぐ大会');original.surface='grass';original.format=3;original.finalFormat=5;original.theme='purple';
+  context.raw={version:2,latestSeriesId:'2018-1',players:drawPlayers(6).map((p,i)=>({...p,cards:{...p.cards,...([0,2,5].includes(i)?{'2018-1':{stats:{power:99}}}:{})}})),tournaments:[original]};
+  run('world=normalizeWorld(raw);t=world.tournaments[0]');const before=copy(run('t')),ui=copy(run('world.ui'));
+  const next=copy(run('repeatWorldTournament(world,t)'));assert.notEqual(next.id,before.id);assert.equal(next.seriesId,'2018-1');assert.equal(next.status,'draft');
+  for(const key of ['name','surface','format','finalFormat','theme'])assert.equal(next[key],before[key]);
+  assert.deepEqual(next.entrants.map(e=>e.playerId).sort(),['p_00001','p_00003']);assert.deepEqual(next.snapshot,{});assert.deepEqual(next.fatigue,{});assert.equal(next.championId,null);assert.ok(next.matches.every(m=>m.result===null));
+  assert.deepEqual(copy(run('t')),before);assert.deepEqual(copy(run('world.ui')),ui);assert.equal(run('world.tournaments.length'),2);
+  run('world=importWorld(createEmptyWorld(),parseWorldImport(prepareWorldExport(world).text),"replace")');assert.deepEqual(copy(run('world.tournaments[1]')),next);
+  assert.equal(run('repeatWorldTournament(world,world.tournaments[1])'),null);
+});
+
+test("次シリーズが未作成なら追加し、出場候補0・1人の準備中大会も保存して編集できる",()=>{
+  const original=finishedRecords(2,'2017-2');
+  for(const count of [0,1]) {
+    context.raw={version:2,latestSeriesId:'2017-2',players:drawPlayers(2).map((p,i)=>({...p,cards:{...p.cards,...(i<count?{'2018-1':{}}:{})}})),tournaments:[original]};
+    run('world=normalizeWorld(raw);t=world.tournaments[0]');
+    // 正規化でカードのある期まで伸びるため、シリーズ追加自体は0人のケースで確認する。
+    const next=copy(run('repeatWorldTournament(world,t)'));assert.equal(next.seriesId,'2018-1');assert.equal(next.entrants.length,count);assert.equal(next.status,'draft');
+    assert.equal(run('world.latestSeriesId'),'2018-1');if(count===0)assert.equal(run('world.ui.seriesId'),'2018-1');
+    assert.equal(run("resolveTournamentRoute(world,'#/tournament/'+world.tournaments[1].id+'/edit').type"),'edit');
+    run('world=normalizeWorld(JSON.parse(JSON.stringify(world)))');assert.deepEqual(copy(run('world.tournaments[1]')),next);
+  }
+});

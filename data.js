@@ -357,6 +357,8 @@ const DATA = {
     statuses: { draft: "準備中", live: "開催中", done: "終了" },
     views: [{ id: "round", name: "ラウンド別" }, { id: "bracket", name: "トーナメント表" }],
     rounds: ["決勝", "準決勝", "準々決勝"],
+    standings: { champion: "優勝", runnerUp: "準優勝", best: "ベスト{count}", firstRound: "1回戦敗退" },
+    records: { cupColor: "#C8960C" },
     ui: {
       entry: "大会", list: "大会一覧", create: "大会を作る", edit: "設定を変える", save: "変更を保存",
       back: "← 大会一覧へ", backDraw: "← 大会へ", empty: "まだ大会がありません", anonymous: "無名の大会",
@@ -372,7 +374,12 @@ const DATA = {
       roundAll: "このラウンドを結果だけで進める", remainingAll: "残りをすべて結果だけで進める",
       remainingConfirm: "残りのすべての試合を結果だけで進めます。よろしいですか？",
       championTitle: "{name} 優勝", championScreen: "優勝の画面", cup: "優勝カップ", path: "勝ち上がりの記録",
-      pathMatch: "{round}：{opponent}　{score}", pathBye: "{round}：不戦勝"
+      pathMatch: "{round}：{opponent}　{score}", pathBye: "{round}：不戦勝",
+      records: "大会の成績", titles: "優勝回数", runnerUps: "準優勝回数", career: "通算勝敗",
+      titleCount: "{count}回", winLoss: "{wins}勝 {losses}敗", noRecords: "まだ大会に出場していません",
+      champions: "この大会の歴代優勝者", noChampions: "まだ優勝者はいません", seriesChampion: "このシリーズの大会で優勝",
+      nextTournament: "次のシリーズで開催する", nextSeriesConfirm: "{series}を追加して、次の大会を作成します。よろしいですか？",
+      nextCreated: "{series}の大会を作成しました。"
     },
     injury: {
       base: 0.0005, fatigueScale: 0.05,
