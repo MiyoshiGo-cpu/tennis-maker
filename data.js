@@ -183,6 +183,70 @@ const DATA = {
     { group: "minus", chip: "bad" }
   ],
   exclusive: [["fast_start", "slow_starter"], ["tenacious", "quitter"]],
+  match: {
+    rules: { formats: [1, 3, 5], initialFormat: 3, initialSurface: "hard", initialServer: "random", gamePoints: 4, setGames: 6, tiebreakPoints: 7, lead: 2, pointLabels: ["0", "15", "30", "40"], advantage: "AD" },
+    random: { increment: 0x6D2B79F5, shiftA: 15, shiftB: 7, shiftC: 14, mix: 61, divisor: 4294967296 },
+    effective: { min: 1, max: 130, formRange: 3, streakyMultiplier: 2, surface: 3, fatigueCeiling: 99, fatigue: 0.03, pressureCenter: 50, pressure: 0.15, earlyGames: 4 },
+    point: {
+      firstIn: 0.62, firstControl: 0.003, secondIn: 0.90, secondControl: 0.0015,
+      ace: 0.07, acePower: 0.0015, center: 50, secondAce: 0.2, secondPenalty: 0.07,
+      base: { hard: 0.62, clay: 0.59, grass: 0.65 },
+      surfaceAce: { hard: 0, clay: -0.02, grass: 0.03 },
+      kServe: 0.0011, kRally: 0.0011, kNet: 0.0011, min: 0.25, max: 0.90, netChance: 0.70
+    },
+    weights: {
+      serve: { power: 0.55, control: 0.45 }, return: { control: 0.45, speed: 0.35, power: 0.20 },
+      rally: { control: 0.40, power: 0.35, speed: 0.25 }, net: { net: 0.60, power: 0.40 },
+      pass: { control: 0.45, speed: 0.35, power: 0.20 }
+    },
+    serves: {
+      flat: { first: -0.05, ace: 0.04, rating: 3, second: 0 },
+      slice: { first: 0, ace: 0.02, rating: 1, second: 0 },
+      kick: { first: 0.05, ace: -0.01, rating: 0, second: 0.03 },
+      twist: { first: 0.03, ace: 0, rating: 1, second: 0.02 },
+      under: { first: 0.02, ace: 0.02, rating: -3, second: 0 }
+    },
+    styles: {
+      aggressive: { hard: 2, clay: 0, grass: 1 }, defensive: { hard: 0, clay: 3, grass: -1 },
+      serve_volley: { hard: 0, clay: -2, grass: 3 }, allround: { hard: 1, clay: 1, grass: 1 }, trickster: { hard: 1, clay: 1, grass: 0 }
+    },
+    matchups: { trickster: { defensive: 2 }, defensive: { aggressive: 1 }, aggressive: { serve_volley: 1 } },
+    shots: {
+      levels: { great: 6, good: 3, none: 0, bad: -4 },
+      rally: { forehand: 0.25, backhand: 0.25, slice_shot: 0.2, drop: 0.2 },
+      return: { return: 0.5 }, net: { volley: 0.5, smash: 0.5 }, pass: { lob: 0.5, passing: 0.5 }, aceReturn: 0.002,
+      selectionBase: 10, selectionScale: 1, selectionMin: 1,
+      selection: { forehand: 4, backhand: 3, slice_shot: 1, drop: 1, lob: 1 },
+      styleSelection: { aggressive: { forehand: 2 }, defensive: { slice_shot: 3 }, trickster: { drop: 4, lob: 4 } },
+      netShots: ["volley", "smash"], passShots: ["passing", "lob"], returnShots: ["return"]
+    },
+    abilities: {
+      ranks: { A: 3, B: 2, C: 1, D: 0, E: -1, F: -2, G: -3 }, rankScale: 1.5,
+      bullet_serve: { ace: 0.06, serve: 8 }, precision: { first: 0.05, control: 6 },
+      gods_touch: { net: 8 }, idaten: { speed: 8 }, champion: 5, adversity: 4, adversityGames: 2,
+      fast_start: 4, slow_starter: -4, short_temper: -3, quitter: -4, rising: 3, tenacious: 2,
+      high_point: 5, highServes: ["kick", "twist"], double_fault: -0.08
+    },
+    finishes: {
+      serviceWinner: { base: 1, stat: "power", scale: 0.012, styles: { serve_volley: 0.5, aggressive: 0.4 } },
+      returnAce: { base: 0.4, stat: "control", scale: 0.005, styles: { aggressive: 0.3 } },
+      winner: { base: 1, stat: "power", scale: 0.025, styles: { aggressive: 1.5, trickster: 0.5 } },
+      error: { base: 2, stat: "speed", scale: 0.008, styles: { defensive: 2, trickster: 0.5 } }
+    },
+    pressure: { break: "ブレークポイント", set: "セットポイント", match: "マッチポイント", tiebreak: "タイブレーク" },
+    commentary: {
+      ace: ["{name}、{serve}でエース！", "{name}の{serve}、相手は動けない！", "サービスエース！ {name}が突き放す。"],
+      doubleFault: ["{opponent}、痛いダブルフォールト。", "2ndサーブも外れた。{opponent}のダブルフォールト。", "{opponent}のサーブがネット。ダブルフォールトだ。"],
+      serviceWinner: ["{name}のサーブに{opponent}は返せない！", "{name}、鋭い{serve}でリターンを封じる。", "リターンが届かない。{name}のサービスウィナー！"],
+      winner: ["{name}、{shot}で決めた！", "{name}の{shot}がラインを捉える！", "鮮やかな{shot}！ {name}がポイントを取る。"],
+      error: ["ラリーの末、{opponent}の{shot}がネット。", "{opponent}の{shot}がアウト。{name}のポイント。", "{name}が粘った。{opponent}に{shot}のミス。"],
+      returnAce: ["{name}、リターンエース！", "{name}のリターンが鮮やかに抜ける！", "サーブを叩いた！ {name}がリターンで決める。"],
+      net: ["{name}、ネットで{shot}を決めた！", "{name}の{shot}！ 前で仕留める。", "ネットを取った{name}、{shot}でポイント！"],
+      pass: ["{name}、{shot}でネットを破る！", "{name}の{shot}が{opponent}を抜いた！", "{name}、見事な{shot}！ ネットの相手をかわした。"]
+    },
+    lines: { pressure: "{name}、{pressure}。", game: "ゲーム {name}。{a}-{b}", set: "第{set}セットは {name}が {a}-{b} で獲得。", match: "ゲームセット！ {name}の勝利" },
+    errors: { options: "対戦する2枚のカードと有効な試合設定を指定してください。", seed: "seed は有限の数値で指定してください。" }
+  },
   score: {
     frontWeight: 0.7, backWeight: 0.3, scale: 40, min: 40,
     ranks: [
@@ -192,6 +256,9 @@ const DATA = {
     ]
   }
 };
+
+// Node の試合エンジンでも同じ定義を使う。
+if (typeof module !== "undefined" && module.exports) module.exports = DATA;
 
 // file:// での画像出力用。支給SVGの内容を無変更で保持する。
 DATA.iconSvg = {
