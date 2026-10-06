@@ -59,7 +59,7 @@ test("v1が初期値・欠損初期値・未知項目だけなら移行保存し
   }
   const missing = harness();
   assert.deepEqual(copy(missing.run("WORLD_STORAGE.load()")), {
-    version: 2, latestSeriesId: "2017-1", players: [],
+    version: 2, latestSeriesId: "2017-1", players: [], tournaments: [],
     ui: { seriesId: "2017-1", listMode: "series", sort: "score", lastExportedAt: null, matchSetup: null }
   });
 });
@@ -576,4 +576,53 @@ test("前回の全対戦設定を保存・復元・JSONで保持し、結果・�
   h.run('var restored=WORLD_STORAGE.load(); deleteWorldPlayer(restored,"p_z12345"); WORLD_STORAGE.save(restored);');
   assert.equal(h.run('WORLD_STORAGE.load().ui.matchSetup.a.playerId'), "p_a12345");
   assert.equal(h.run('resolveMatchEntries(WORLD_STORAGE.load(),WORLD_STORAGE.load().ui.matchSetup)'), null);
+});
+
+function tournamentWorld() {
+  const ids=["p_00001","p_00002","p_00003"];
+  const snapshot=Object.fromEntries(ids.map((id,index)=>[id,{name:"選手"+index,hand:index?"right":"left",backhand:"two",card:{pose:"serve_toss"}}]));
+  const result={winner:"b",scoreText:"4-6 6-3 2-1 RET",sets:[{a:4,b:6},{a:6,b:3},{a:2,b:1}],retired:"a",seed:321,carry:{a:1.2,b:0},stats:{a:{aces:3},b:{aces:4}},points:172,log:["保存しない"],extra:true};
+  const base={name:"大会",seriesId:"2017-1",surface:"clay",format:3,finalFormat:5,theme:"red",seed:42,createdAt:"2026-10-06T12:00:00.000Z",entrants:ids.map((playerId,index)=>({playerId,seedRank:index<2?index+1:null})),
+    snapshot,slots:[ids[0],null,ids[1],ids[2]],matches:[{id:"r1-m1",a:ids[0],b:null,status:"bye",result:null},{id:"r1-m2",a:ids[1],b:ids[2],status:"done",result}],fatigue:{[ids[0]]:1.2,[ids[1]]:2.4,[ids[2]]:3.6},championId:ids[2]};
+  return {version:2,players:ids.map((id,index)=>({id,name:"選手"+index,createdAt:new Date(Date.UTC(2026,0,index+1)).toISOString(),cards:{"2017-1":{}}})),
+    tournaments:[{...base,id:"t_draft1",status:"draft"},{...base,id:"t_live01",status:"live"},{...base,id:"t_done01",status:"done"}]};
+}
+
+test("大会を持たない旧ワールドは空配列を補い、大会を正規化して保存・復元する",()=>{
+  const raw=tournamentWorld(),h=harness({"tennisMaker.v2.world":JSON.stringify(raw)});
+  h.run("world=WORLD_STORAGE.load()");const world=copy(h.run("world"));
+  assert.equal(world.tournaments.length,3);
+  const [draft,live,done]=world.tournaments;
+  assert.deepEqual(draft.snapshot,{});assert.equal(draft.slots.length,4);assert.equal(draft.entrants.length,3);
+  assert.equal(live.theme,"red");assert.equal(live.finalFormat,5);assert.equal(live.snapshot.p_00001.card.pose,"serve_toss");
+  assert.deepEqual(live.slots,raw.tournaments[1].slots);
+  const result=live.matches.find(m=>m.id==="r1-m2").result;
+  assert.equal(result.points,172);assert.equal(result.retired,"a");assert.equal(result.seed,321);assert.deepEqual(result.carry,{a:1.2,b:0});assert.equal(result.log,undefined);assert.equal(result.extra,undefined);
+  assert.equal(done.championId,"p_00003");assert.equal(h.run("WORLD_STORAGE.save(world)"),true);
+  assert.deepEqual(copy(h.run("WORLD_STORAGE.load()")),world);
+  const old=harness({"tennisMaker.v2.world":JSON.stringify({version:2,players:[]})});assert.deepEqual(copy(old.run("WORLD_STORAGE.load().tournaments")),[]);
+  const bad=harness();bad.run("world=normalizeWorld("+JSON.stringify({...raw,tournaments:[null,[],{},...raw.tournaments,raw.tournaments[0]]})+")");
+  const repaired=copy(bad.run("world.tournaments"));assert.equal(new Set(repaired.map(t=>t.id)).size,repaired.length);
+});
+
+test("大会JSONは全置換で復元し、選手追加では大会を取り込まず既存の大会を保持する",()=>{
+  const h=harness();h.run("world=normalizeWorld("+JSON.stringify(tournamentWorld())+")");
+  const before=copy(h.run("world"));h.run("exported=prepareWorldExport(world,new Date('2026-10-06T13:00:00Z')); imported=parseWorldImport(exported.text)");
+  assert.deepEqual(copy(h.run("importWorld(createEmptyWorld(),imported,'replace').tournaments")),before.tournaments);
+  assert.deepEqual(copy(h.run("importWorld(createEmptyWorld(),imported,'append').tournaments")),[]);
+  assert.deepEqual(copy(h.run("importWorld(world,imported,'append').tournaments")),before.tournaments);
+  assert.equal(h.run("importWorld(world,imported,'append').players.length"),6);
+  assert.deepEqual(copy(h.run("world")),before);
+  for(const tournaments of [{},[null],["invalid"]])assert.throws(()=>h.run("parseWorldImport("+JSON.stringify(JSON.stringify({version:2,players:[],tournaments}))+ ")"));
+});
+
+test("選手削除は準備中の出場者だけを外し、開催中・終了した大会のsnapshotと結果を保持する",()=>{
+  const h=harness();h.run("world=normalizeWorld("+JSON.stringify(tournamentWorld())+")");
+  const before=copy(h.run("world.tournaments.slice(1)"));
+  h.run("deleteWorldPlayer(world,'p_00001')");assert.equal(h.run("world.tournaments[0].entrants.length"),2);
+  assert.equal(h.run("world.tournaments[0].slots.includes('p_00001')"),false);
+  assert.deepEqual(copy(h.run("world.tournaments.slice(1)")),before);
+  h.run("deleteWorldPlayer(world,'p_00002'); deleteWorldPlayer(world,'p_00003'); WORLD_STORAGE.save(world)");
+  assert.equal(h.run("WORLD_STORAGE.load().tournaments[0].entrants.length"),0);
+  assert.deepEqual(copy(h.run("WORLD_STORAGE.load().tournaments.slice(1)")),before);
 });

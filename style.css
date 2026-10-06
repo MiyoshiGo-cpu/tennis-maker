@@ -292,13 +292,13 @@ dialog p { font-size: 12px; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 
-/* 試合結果だけに適用する大会テーマ。色はDATA.match.themesから受け取る。 */
-.result-page, .result-export-card {
+/* 試合結果と大会に適用するテーマ。色はDATA.match.themesから受け取る。 */
+.result-page, .result-export-card, .tournament-page {
   color: var(--result-text);
   background: radial-gradient(ellipse at 10% 0, var(--result-light), transparent 38%), radial-gradient(ellipse at 90% 0, var(--result-light), transparent 38%), linear-gradient(var(--result-bg-top), var(--result-bg-bottom));
   min-height: 100vh;
 }
-.result-page .page-header { color: var(--result-text); }
+.result-page .page-header, .tournament-page .page-header { color: var(--result-text); }
 .result-content { position: relative; isolation: isolate; padding-top: 12px; overflow: clip; }
 .result-contenders { display: grid; grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr); gap: 6px; align-items: center; padding: 16px 6px; }
 .result-contender { min-width: 0; animation: result-card-enter var(--time-cards) both; --card-entry: -32px; }
@@ -417,3 +417,55 @@ dialog p { font-size: 12px; }
 .result-export-card .result-headline { font-size: 26px; }
 .result-export-card .result-scoreboard th { font-size: 12px; }
 .result-export-card .result-scoreboard td { font-size: 34px; }
+
+.tournament-screen { max-width: 1080px; min-width: 0; margin: 0 auto; padding: 0 12px 48px; }
+.tournament-screen h2 { margin: 22px 0 16px; font-size: 22px; overflow-wrap: anywhere; }
+.tournament-list { display: grid; gap: 12px; margin-top: 24px; }
+.tournament-list-row { display: grid; gap: 6px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); color: var(--navy); text-decoration: none; overflow-wrap: anywhere; }
+.tournament-list-row strong { font-size: 18px; }
+.tournament-list-row span { color: var(--muted); font-size: 12px; }
+.tournament-form { display: grid; gap: 20px; }
+.tournament-settings { display: grid; gap: 8px; }
+.tournament-form fieldset { min-width: 0; padding: 16px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); margin: 0; }
+.tournament-form legend { padding: 0 6px; font-weight: 700; font-size: 15px; }
+.theme-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.theme-tile { position: relative; display: grid; align-content: start; gap: 8px; padding: 8px; border: 3px solid var(--line); border-radius: 8px; cursor: pointer; min-width: 0; }
+.theme-tile input { position: absolute; opacity: 0; width: 44px; height: 44px; margin: 0; }
+.theme-tile:has(input:checked) { border-color: var(--ball); }
+.theme-tile:has(input:focus-visible) { outline: 3px solid var(--greatBg); outline-offset: 3px; }
+.theme-tile strong { font-size: 11px; text-align: center; overflow-wrap: anywhere; }
+.theme-swatch { display: grid; place-items: center; height: 62px; border-radius: 4px; }
+.theme-swatch span { width: 26px; height: 26px; border-radius: 50%; }
+.entrant-list { display: grid; gap: 6px; }
+.entrant-choice { display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 8px; background: var(--paper); border-radius: 8px; cursor: pointer; }
+.entrant-choice input { flex: 0 0 20px; width: 20px; }
+.entrant-choice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.tournament-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+.tournament-page .button { color: var(--result-text); background: var(--result-panel); border-color: var(--result-main); }
+.tournament-page .button[aria-pressed="true"] { background: var(--result-accent); color: var(--result-winner-ink); border-color: var(--result-accent); }
+.tournament-meta { font-size: 13px; color: var(--result-muted); }
+.round-matches { display: grid; gap: 12px; }
+.tournament-pair { min-width: 0; width: 100%; border: 1px solid var(--result-main); border-radius: 8px; background: var(--result-panel); overflow: hidden; }
+.tournament-player { display: flex; align-items: center; gap: 10px; padding: 10px; min-height: 60px; }
+.tournament-player + .tournament-player { border-top: 1px solid var(--result-main); }
+.tournament-identity { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tournament-identity strong { display: block; font-size: 14px; }
+.tournament-identity small { display: block; font-size: 10px; color: var(--result-muted); }
+.tournament-player .list-overall-label { color: var(--result-muted); }
+.tournament-player .list-rank { background: var(--result-accent); color: var(--result-winner-ink); }
+.tournament-winner { color: var(--result-accent); }
+.tournament-score { margin: 0; padding: 10px; border-top: 1px solid var(--result-main); font: 700 22px/1.4 "Barlow Condensed", sans-serif; }
+.bracket-scroll { max-width: 100%; min-width: 0; overflow-x: auto; border: 1px solid var(--result-main); border-radius: 8px; }
+.bracket-grid { display: grid; grid-template-columns: repeat(var(--rounds), 240px); gap: 32px; width: max-content; padding: 16px; }
+.bracket-column h3 { margin: 0 0 16px; font-size: 14px; color: var(--result-accent); }
+.bracket-cells { display: grid; grid-template-rows: repeat(var(--slots), 74px); }
+.bracket-cell { position: relative; display: flex; align-items: center; padding: 8px 0; min-height: 0; }
+.bracket-column:not(:last-child) .tournament-pair::after { content: ""; position: absolute; right: -16px; top: 50%; width: 16px; border-top: 1px solid var(--result-main); }
+.bracket-column:not(:first-child) .bracket-cell::before { content: ""; position: absolute; left: -16px; top: 25%; height: 50%; border-left: 1px solid var(--result-main); }
+.bracket-column:not(:first-child) .tournament-pair::before { content: ""; position: absolute; left: -16px; top: 50%; width: 16px; border-top: 1px solid var(--result-main); }
+@media (min-width: 900px) {
+  .tournament-screen { padding: 0 24px 48px; }
+  .tournament-settings { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .theme-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .entrant-list, .round-matches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

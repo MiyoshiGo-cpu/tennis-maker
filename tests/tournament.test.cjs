@@ -149,3 +149,95 @@ test("不正な疲労やinjury設定は拒否し、欠損durabilityはDとして
   const a=entry("A");a.card.rankSkills={};
   assert.deepEqual(TennisMatch.simulate(options({a,injury:true,seed:3})),TennisMatch.simulate(options({injury:true,seed:3})));
 });
+
+function drawPlayers(count) {
+  return Array.from({length:count},(_,index)=>({id:"p_"+String(index+1).padStart(5,"0"),name:"選手"+String(index+1).padStart(3,"0"),
+    createdAt:new Date(Date.UTC(2026,0,1,0,index)).toISOString(),
+    cards:{"2017-1":{stats:Object.fromEntries(Object.keys(entry("A").card.stats).map(id=>[id,99-Math.floor(index/3)]))}}}));
+}
+function draw(players,seed=42) {
+  context.players=players;context.seed=seed;
+  return copy(vm.runInContext("createTournamentDraw(players,'2017-1',seed)",context));
+}
+
+test("2・3・8・13・128人のドローは枠数・シード数・BYE数・同seedの再現性を満たす",()=>{
+  for(const [count,size,seeds]of [[2,2,0],[3,4,2],[8,8,2],[13,16,4],[128,128,32]]) {
+    const players=drawPlayers(count),before=copy(players),result=draw(players);
+    assert.equal(result.slots.length,size);assert.equal(result.entrants.filter(e=>e.seedRank).length,seeds);
+    assert.equal(result.slots.filter(id=>id===null).length,size-count);assert.equal(result.matches.length,size-1);
+    assert.equal(new Set(result.slots.filter(Boolean)).size,count);assert.deepEqual(draw([...players].reverse()),result);
+    assert.deepEqual(players,before);
+    const seeded=result.entrants.filter(e=>e.seedRank);
+    for(let i=0;i<Math.min(size-count,seeds);i++)assert.equal(result.slots[result.slots.indexOf(seeded[i].playerId)^1],null);
+  }
+});
+
+test("全人数2〜128のドローにBYE同士がなく、各選手がちょうど1枠に入る",()=>{
+  for(let count=2;count<=128;count++)for(const seed of [1,42,99]) {
+    const result=draw(drawPlayers(count),seed);
+    assert.deepEqual(result.slots.filter(Boolean).sort(),drawPlayers(count).map(p=>p.id).sort());
+    const first=result.matches.filter(m=>m.round===1);
+    assert.ok(first.every(m=>m.a||m.b));
+    assert.equal(first.filter(m=>m.status==="bye").length,result.slots.length-count);
+    assert.ok(result.matches.filter(m=>m.round>1).every(m=>m.status==="pending"));
+  }
+});
+
+test("シード1・2は上下端、各段階のシードは別区画に入り、決勝・準決勝前に当たらない",()=>{
+  for(const count of [3,8,13,32,64,128])for(const seed of [1,2,42,99]) {
+    const result=draw(drawPlayers(count),seed),size=result.slots.length;
+    const positions=result.entrants.filter(e=>e.seedRank).map(e=>result.slots.indexOf(e.playerId));
+    assert.equal(positions[0],0);assert.equal(positions[1],size-1);
+    for(let group=2;group<=positions.length;group*=2) {
+      const width=size/group,top=positions.slice(0,group);
+      assert.equal(new Set(top.map(p=>Math.floor(p/width))).size,group);
+      assert.ok(top.every(p=>p%width===0||p%width===width-1));
+      for(let i=0;i<top.length;i++)for(let j=i+1;j<top.length;j++)assert.ok(Math.floor(Math.log2(top[i]^top[j]))+1>=Math.log2(width)+1);
+    }
+  }
+  const first=draw(drawPlayers(32),1);assert.notDeepEqual(draw(drawPlayers(32),2).slots,first.slots);
+});
+
+test("大会は作成・編集・再抽選でき、出場資格と人数を守り、開催中は変更できない",()=>{
+  context.raw={version:2,players:drawPlayers(13)};
+  vm.runInContext("world=normalizeWorld(raw)",context);
+  context.settings={...DATA.tournament.initial,seriesId:"2017-1",name:"大会",seed:42,entrantIds:drawPlayers(13).map(p=>p.id)};
+  const created=copy(vm.runInContext("t=createWorldTournament(world,settings)",context));
+  assert.equal(created.status,"draft");assert.match(created.id,/^t_[a-z0-9]{5,}$/);assert.deepEqual(created.snapshot,{});
+  context.settings={...context.settings,name:"変更",theme:"red",entrantIds:drawPlayers(3).map(p=>p.id)};
+  assert.equal(vm.runInContext("updateWorldTournament(world,t,settings)",context),true);
+  const edited=copy(vm.runInContext("t",context));assert.equal(edited.id,created.id);assert.equal(edited.createdAt,created.createdAt);
+  assert.equal(edited.name,"変更");assert.equal(edited.slots.length,4);
+  assert.equal(vm.runInContext("redrawWorldTournament(world,t)",context),true);assert.notEqual(vm.runInContext("t.seed",context),42);
+  for(const entrantIds of [[],["p_00001"],["p_00001","p_bad"],drawPlayers(129).map(p=>p.id)]) {
+    context.settings.entrantIds=entrantIds;
+    assert.equal(vm.runInContext("createWorldTournament(world,settings)",context),null);
+    assert.equal(vm.runInContext("updateWorldTournament(world,t,settings)",context),false);
+  }
+  vm.runInContext("t.status='live'",context);
+  assert.equal(vm.runInContext("updateWorldTournament(world,t,settings)",context),false);
+  assert.equal(vm.runInContext("redrawWorldTournament(world,t)",context),false);
+});
+
+test("大会ルートは存在する大会だけを開き、開催中の編集ルートは大会表示に戻す",()=>{
+  context.world={tournaments:[{id:"t_aaaaa",status:"draft"},{id:"t_bbbbb",status:"live"}]};
+  for(const [hash,type]of [["#/tournaments","list"],["#/tournaments/new","edit"],["#/tournament/t_aaaaa","draw"],["#/tournament/t_aaaaa/edit","edit"],["#/tournament/t_bbbbb/edit","draw"]]) {
+    context.hash=hash;assert.equal(vm.runInContext("resolveTournamentRoute(world,hash).type",context),type);
+  }
+  context.hash="#/tournament/t_missing";assert.equal(vm.runInContext("resolveTournamentRoute(world,hash)",context),null);
+});
+
+test("全6テーマは仕様の色と共通キーを持ち、通常対戦のdefaultは変わらない",()=>{
+  const expected={default:["#0B1530","#16306E","#1F4FBF","#FFD23F"],clay:["#2A0F08","#7A2E14","#C8562D","#FFE3B3"],
+    grass:["#0B2416","#1C5A35","#2F8A4F","#C9A7FF"],purple:["#170B2E","#3B1F6E","#6A3FC8","#F5C451"],
+    ice:["#071A2B","#0F3D5C","#1E7FB8","#7FE0FF"],red:["#140708","#3D0E12","#B3202E","#FF8A80"]};
+  for(const [id,values]of Object.entries(expected)) {
+    const theme=DATA.match.themes[id];assert.deepEqual([theme["bg-top"],theme["bg-bottom"],theme.main,theme.accent],values);
+    assert.deepEqual(Object.keys(theme).sort(),Object.keys(DATA.match.themes.default).sort());
+    assert.equal(theme.text,"#FFFFFF");assert.equal(theme["winner-ink"],"#14213D");
+  }
+  context.round=1;context.slots=16;assert.equal(vm.runInContext("tournamentRoundName(round,slots)",context),"1回戦");
+  context.round=2;assert.equal(vm.runInContext("tournamentRoundName(round,slots)",context),"準々決勝");
+  context.round=3;assert.equal(vm.runInContext("tournamentRoundName(round,slots)",context),"準決勝");
+  context.round=4;assert.equal(vm.runInContext("tournamentRoundName(round,slots)",context),"決勝");
+});

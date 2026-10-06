@@ -200,6 +200,11 @@ const DATA = {
   exclusive: [["fast_start", "slow_starter"], ["tenacious", "quitter"]],
   match: {
     themes: {
+      clay: { "bg-top": "#2A0F08", "bg-bottom": "#7A2E14", main: "#C8562D", accent: "#FFE3B3", text: "#FFFFFF", muted: "rgba(255,255,255,0.55)", light: "rgba(255,255,255,0.10)", glow: "rgba(255,227,179,0.45)", panel: "rgba(42,15,8,0.65)", "winner-ink": "#14213D" },
+      grass: { "bg-top": "#0B2416", "bg-bottom": "#1C5A35", main: "#2F8A4F", accent: "#C9A7FF", text: "#FFFFFF", muted: "rgba(255,255,255,0.55)", light: "rgba(255,255,255,0.10)", glow: "rgba(201,167,255,0.45)", panel: "rgba(11,36,22,0.65)", "winner-ink": "#14213D" },
+      purple: { "bg-top": "#170B2E", "bg-bottom": "#3B1F6E", main: "#6A3FC8", accent: "#F5C451", text: "#FFFFFF", muted: "rgba(255,255,255,0.55)", light: "rgba(255,255,255,0.10)", glow: "rgba(245,196,81,0.45)", panel: "rgba(23,11,46,0.65)", "winner-ink": "#14213D" },
+      ice: { "bg-top": "#071A2B", "bg-bottom": "#0F3D5C", main: "#1E7FB8", accent: "#7FE0FF", text: "#FFFFFF", muted: "rgba(255,255,255,0.55)", light: "rgba(255,255,255,0.10)", glow: "rgba(127,224,255,0.45)", panel: "rgba(7,26,43,0.65)", "winner-ink": "#14213D" },
+      red: { "bg-top": "#140708", "bg-bottom": "#3D0E12", main: "#B3202E", accent: "#FF8A80", text: "#FFFFFF", muted: "rgba(255,255,255,0.55)", light: "rgba(255,255,255,0.10)", glow: "rgba(255,138,128,0.45)", panel: "rgba(20,7,8,0.65)", "winner-ink": "#14213D" },
       default: {
         "bg-top": "#0B1530", "bg-bottom": "#16306E", main: "#1F4FBF", accent: "#FFD23F",
         text: "#FFFFFF", muted: "rgba(255,255,255,0.55)", light: "rgba(255,255,255,0.10)",
@@ -329,6 +334,37 @@ const DATA = {
     errors: { options: "対戦する2枚のカードと有効な試合設定を指定してください。", seed: "seed は有限の数値で指定してください。" }
   },
   tournament: {
+    limits: { name: 20, minEntrants: 2, maxEntrants: 128, bracketMax: 32 },
+    id: { prefix: "t_", radix: 36, randomLength: 4 },
+    random: { increment: 0x6D2B79F5, shiftA: 15, shiftB: 7, shiftC: 14, mix: 61, divisor: 4294967296 },
+    initial: { surface: "hard", format: 3, finalFormat: 0, theme: "default" },
+    draw: { minSlots: 2, seedDivisor: 4, fourSlotSeeds: 2 },
+    templates: [
+      { id: "slam", name: "グランドスラム風", format: 5, finalFormat: 0, theme: "default" },
+      { id: "tour", name: "ツアー大会風", format: 3, finalFormat: 0, theme: "ice" },
+      { id: "club", name: "部活の大会", format: 1, finalFormat: 3, theme: "grass" },
+      { id: "custom", name: "自由に作る", format: 3, finalFormat: 0, theme: "default" }
+    ],
+    themes: [
+      { id: "default", name: "ナイトブルー" }, { id: "clay", name: "クレーサンセット" },
+      { id: "grass", name: "グラスガーデン" }, { id: "purple", name: "ミッドナイトパープル" },
+      { id: "ice", name: "アイスハード" }, { id: "red", name: "レッドナイト" }
+    ],
+    statuses: { draft: "準備中", live: "開催中", done: "終了" },
+    views: [{ id: "round", name: "ラウンド別" }, { id: "bracket", name: "トーナメント表" }],
+    rounds: ["決勝", "準決勝", "準々決勝"],
+    ui: {
+      entry: "大会", list: "大会一覧", create: "大会を作る", edit: "設定を変える", save: "変更を保存",
+      back: "← 大会一覧へ", backDraw: "← 大会へ", empty: "まだ大会がありません", anonymous: "無名の大会",
+      template: "ひな形", name: "大会名", series: "シリーズ", surface: "サーフェス", format: "試合形式",
+      finalFormat: "決勝の試合形式", sameFormat: "本戦と同じ", theme: "テーマ色", entrants: "出場選手",
+      selectAll: "全員を選ぶ", clearAll: "全員を外す", selected: "{count}人を選択",
+      entrantHint: "出場選手は2人以上128人以下で選んでください。", noCandidates: "このシリーズにカードがある選手はいません",
+      redraw: "組み合わせをやり直す", delete: "大会を削除", deleteConfirm: "{name}を削除します。よろしいですか？",
+      bye: "BYE", pending: "−", seed: "第{rank}シード", round: "{round}回戦", champion: "優勝：{name}",
+      fatigue: "疲労 {value}", noDraw: "出場選手を2人以上選んでください。", created: "大会を作成しました。",
+      updated: "大会の設定を変更しました。", redrawn: "組み合わせをやり直しました。", invalid: "大会の設定を確認してください。"
+    },
     injury: {
       base: 0.0005, fatigueScale: 0.05,
       durability: { A: 0.4, B: 0.6, C: 0.8, D: 1.0, E: 1.3, F: 1.7, G: 2.2 }
