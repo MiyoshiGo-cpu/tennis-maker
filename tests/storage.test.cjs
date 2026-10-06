@@ -60,7 +60,7 @@ test("v1が初期値・欠損初期値・未知項目だけなら移行保存し
   const missing = harness();
   assert.deepEqual(copy(missing.run("WORLD_STORAGE.load()")), {
     version: 2, latestSeriesId: "2017-1", players: [],
-    ui: { seriesId: "2017-1", listMode: "series", sort: "score", lastExportedAt: null }
+    ui: { seriesId: "2017-1", listMode: "series", sort: "score", lastExportedAt: null, matchSetup: null }
   });
 });
 
@@ -318,7 +318,7 @@ test("推移グラフのデータは欠けたシリーズを補わず、シリ�
 test("表示シリーズ・全選手表示を保存復元し、カードなしは総合力順で後ろに出す", () => {
   const h = harness();
   h.run('var world=normalizeWorld({players:[{id:"p_old12345",name:"カードなし",cards:{"2017-1":{}}},{id:"p_new12345",name:"カードあり",cards:{"2019-2":{}}}],ui:{seriesId:"2019-2",listMode:"all",sort:"score"}}); WORLD_STORAGE.save(world);');
-  assert.deepEqual(copy(h.run("WORLD_STORAGE.load().ui")), {seriesId:"2019-2",listMode:"all",sort:"score",lastExportedAt:null});
+  assert.deepEqual(copy(h.run("WORLD_STORAGE.load().ui")), {seriesId:"2019-2",listMode:"all",sort:"score",lastExportedAt:null,matchSetup:null});
   assert.deepEqual(copy(h.run("listSeriesPlayers(world).map(p=>p.name)")), ["カードあり", "カードなし"]);
   h.run('world.ui.listMode="series";');
   assert.deepEqual(copy(h.run("listSeriesPlayers(world).map(p=>p.name)")), ["カードあり"]);
@@ -494,4 +494,86 @@ test("同梱ポーズSVGは支給素材と全件一致する", () => {
     assert.equal(embedded[pose.file], fs.readFileSync(path.join(root, pose.file), "utf8"));
     assert.match(embedded[pose.file], /viewBox="0 0 1020 1438"/);
   }
+});
+
+function matchHarness() {
+  const h = harness();
+  h.run('var world=normalizeWorld({players:[{id:"p_z12345",name:"う",cards:{"2017-1":{},"2018-2":{}}},{id:"p_a12345",name:"あ",cards:{"2017-1":{},"2019-1":{}}},{id:"p_empty12345",name:"い",cards:{}}]});');
+  return h;
+}
+
+test("対戦候補はカードのある選手を名前順にし、初回は別選手の最新カードを選ぶ", () => {
+  const h = matchHarness();
+  const before = copy(h.run("world"));
+  assert.deepEqual(copy(h.run("matchPlayers(world).map(player=>player.id)")), ["p_a12345", "p_z12345"]);
+  assert.deepEqual(copy(h.run("normalizeMatchSetup(world,null)")), {
+    a:{playerId:"p_a12345",seriesId:"2019-1"}, b:{playerId:"p_z12345",seriesId:"2018-2"},
+    format:3, surface:"hard", firstServer:"random"
+  });
+  assert.deepEqual(copy(h.run("world")), before);
+});
+
+test("カードのある選手が2人未満なら、1人に複数カードがあっても開始できない", () => {
+  const h = matchHarness();
+  h.run('world.players=world.players.filter(player=>player.id!=="p_z12345");');
+  assert.equal(h.run("resolveMatchEntries(world,normalizeMatchSetup(world,null))"), null);
+  h.run('world.players=[];');
+  const setup = copy(h.run("normalizeMatchSetup(world,null)"));
+  assert.deepEqual(setup.a, {playerId:null,seriesId:null});
+  assert.deepEqual(setup.b, {playerId:null,seriesId:null});
+  assert.equal(h.run("resolveMatchEntries(world,normalizeMatchSetup(world,null))"), null);
+});
+
+test("同一カードは実行前にも拒否し、同じ選手の別シリーズは許可する", () => {
+  const h = matchHarness();
+  h.run('var setup=normalizeMatchSetup(world,{a:{playerId:"p_a12345",seriesId:"2017-1"},b:{playerId:"p_a12345",seriesId:"2019-1"}});');
+  assert.equal(h.run("resolveMatchEntries(world,setup).a.seriesId"), "2017-1");
+  assert.equal(h.run("resolveMatchEntries(world,setup).b.seriesId"), "2019-1");
+  h.run('setup.b={...setup.a};');
+  assert.equal(h.run("resolveMatchEntries(world,setup)"), null);
+  const fixed = copy(h.run("normalizeMatchSetup(world,setup)"));
+  assert.deepEqual(fixed.a, {playerId:"p_a12345",seriesId:"2017-1"});
+  assert.deepEqual(fixed.b, {playerId:"p_a12345",seriesId:"2019-1"});
+});
+
+test("選手切り替えで最新カードを選び、変更した側を保持して相手の重複を解消する", () => {
+  const h = matchHarness();
+  h.run('var setup=normalizeMatchSetup(world,{a:{playerId:"p_z12345",seriesId:"2017-1"},b:{playerId:"p_a12345",seriesId:null}},"b");');
+  assert.equal(h.run("setup.b.seriesId"), "2019-1");
+  h.run('setup.a={...setup.b};');
+  const changed = copy(h.run('normalizeMatchSetup(world,setup,"b")'));
+  assert.equal(changed.b.seriesId, "2019-1");
+  assert.equal(changed.a.seriesId, "2017-1");
+  assert.equal(changed.a.playerId, "p_a12345");
+});
+
+test("未知・削除済みの対戦候補と不正設定は補い、実行前の不正設定も拒否する", () => {
+  const h = matchHarness();
+  h.run('var setup=normalizeMatchSetup(world,{a:{playerId:"p_deleted",seriesId:"2030-2"},b:{playerId:"p_z12345",seriesId:"2018-2"},format:7,surface:"unknown",firstServer:"unknown",seed:1,result:{winner:"a"}});');
+  assert.equal(h.run("setup.a.playerId"), "p_a12345");
+  assert.equal(h.run("setup.format"), 3);
+  assert.equal(h.run("setup.surface"), "hard");
+  assert.equal(h.run("setup.firstServer"), "random");
+  assert.equal(h.run('"seed" in setup || "result" in setup'), false);
+  for (const mutation of ['setup.format=7', 'setup.surface="unknown"', 'setup.firstServer="unknown"', 'setup.a.seriesId="2017-2"', 'setup.a.playerId="missing"']) {
+    h.run('var invalid={...setup,a:{...setup.a}};');
+    h.run(mutation.replaceAll("setup.", "invalid."));
+    assert.equal(h.run("resolveMatchEntries(world,invalid)"), null);
+  }
+  h.run('delete world.players[1].cards["2019-1"];');
+  assert.equal(h.run("normalizeMatchSetup(world,setup).a.seriesId"), "2017-1");
+});
+
+test("前回の全対戦設定を保存・復元・JSONで保持し、結果・乱数は保存しない", () => {
+  const h = matchHarness();
+  for (const format of [1,3,5]) for (const surface of ["hard","clay","grass"]) for (const firstServer of ["random","a","b"]) {
+    h.run(`world.ui.matchSetup={a:{playerId:"p_z12345",seriesId:"2017-1"},b:{playerId:"p_a12345",seriesId:"2019-1"},format:${format},surface:"${surface}",firstServer:"${firstServer}"};`);
+    const expected = copy(h.run("world.ui.matchSetup"));
+    h.run('world.ui.matchSetup.seed=123; world.ui.matchSetup.result={winner:"a"}; WORLD_STORAGE.save(world);');
+    assert.deepEqual(copy(h.run("WORLD_STORAGE.load().ui.matchSetup")), expected);
+    assert.deepEqual(copy(h.run('parseWorldImport(prepareWorldExport(world).text).ui.matchSetup')), expected);
+  }
+  h.run('var restored=WORLD_STORAGE.load(); deleteWorldPlayer(restored,"p_z12345"); WORLD_STORAGE.save(restored);');
+  assert.equal(h.run('WORLD_STORAGE.load().ui.matchSetup.a.playerId'), "p_a12345");
+  assert.equal(h.run('resolveMatchEntries(WORLD_STORAGE.load(),WORLD_STORAGE.load().ui.matchSetup)'), null);
 });

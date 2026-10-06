@@ -182,6 +182,9 @@ function normalizeWorld(raw) {
     if (typeof raw.ui.lastExportedAt === "string" && Number.isFinite(Date.parse(raw.ui.lastExportedAt))) {
       world.ui.lastExportedAt = new Date(raw.ui.lastExportedAt).toISOString();
     }
+    if (raw.ui.matchSetup && typeof raw.ui.matchSetup === "object" && !Array.isArray(raw.ui.matchSetup)) {
+      world.ui.matchSetup = normalizeMatchSetup(world, raw.ui.matchSetup);
+    }
   }
   return world;
 }
@@ -322,6 +325,56 @@ function resolvePlayerRoute(world, hash) {
   return match ? world.players.find(player => player.id === match[1]) || null : null;
 }
 
+function matchPlayers(world) {
+  return world.players.filter(player => Object.keys(player.cards).length > 0)
+    .sort((a, b) => (a.name || DATA.text.anonymous).localeCompare(b.name || DATA.text.anonymous, "ja"));
+}
+
+function matchSeries(player) {
+  return player ? Object.keys(player.cards).sort((a, b) => compareSeries(b, a)) : [];
+}
+
+function normalizeMatchSetup(world, raw, preferredSide = "a") {
+  const players = matchPlayers(world), rules = DATA.match.rules;
+  const setup = {
+    format: rules.formats.includes(raw?.format) ? raw.format : rules.initialFormat,
+    surface: DATA.basic.surface.some(item => item.id === raw?.surface) ? raw.surface : rules.initialSurface,
+    firstServer: DATA.match.ui.firstServers.some(item => item.id === raw?.firstServer) ? raw.firstServer : rules.initialServer
+  };
+  const selectCard = (selection, opponent) => {
+    const preferred = players.find(player => player.id === selection?.playerId);
+    const candidates = preferred ? [preferred, ...players.filter(player => player !== preferred)] : players;
+    for (const player of candidates) {
+      const available = matchSeries(player).filter(id => player.id !== opponent?.playerId || id !== opponent.seriesId);
+      if (!available.length) continue;
+      const seriesId = available.includes(selection?.seriesId) ? selection.seriesId : available[0];
+      return { playerId: player.id, seriesId };
+    }
+    return { playerId: null, seriesId: null };
+  };
+  const otherSide = preferredSide === "a" ? "b" : "a";
+  setup[preferredSide] = selectCard(raw?.[preferredSide]);
+  const otherSelection = raw?.[otherSide] || { playerId: players.find(player => player.id !== setup[preferredSide].playerId)?.id };
+  setup[otherSide] = selectCard(otherSelection, setup[preferredSide]);
+  return setup;
+}
+
+function resolveMatchEntries(world, setup) {
+  if (matchPlayers(world).length < 2 || !setup
+    || !DATA.match.rules.formats.includes(setup.format)
+    || !DATA.basic.surface.some(item => item.id === setup.surface)
+    || !DATA.match.ui.firstServers.some(item => item.id === setup.firstServer)) return null;
+  const entries = {};
+  for (const { id } of DATA.match.ui.sides) {
+    const selection = setup[id];
+    const player = world.players.find(item => item.id === selection?.playerId);
+    if (!player || !Object.hasOwn(player.cards, selection.seriesId)) return null;
+    entries[id] = { player, card: player.cards[selection.seriesId], seriesId: selection.seriesId };
+  }
+  if (entries.a.player.id === entries.b.player.id && entries.a.seriesId === entries.b.seriesId) return null;
+  return { ...entries, format: setup.format, surface: setup.surface, firstServer: setup.firstServer };
+}
+
 // 永続化はワールド単位。このアダプターだけがlocalStorageに触れる。
 function loadWorld(onSaveError) {
   try {
@@ -376,6 +429,7 @@ function calculateScore(card) {
   let player;
   let exporting = false;
   let imageUrl;
+  let matchRun = null;
   const form = document.getElementById("player-form");
   const card = document.getElementById("player-card");
   const dialog = document.getElementById("image-dialog");
@@ -711,16 +765,187 @@ function calculateScore(card) {
       rows.append(row);
     }
     timeline.append(rows);
-    screen.append(back, identity, historyPanel, timeline, deletePlayerButton(entity));
+    const match = element("button", "button primary", DATA.text.matchWithPlayer);
+    match.type = "button";
+    match.disabled = !latestId;
+    match.addEventListener("click", () => {
+      world.ui.matchSetup = normalizeMatchSetup(world, {
+        ...world.ui.matchSetup, a: { playerId: entity.id, seriesId: latestId }
+      });
+      persistWorld();
+      location.hash = "#/match";
+    });
+    screen.append(back, identity, match, historyPanel, timeline, deletePlayerButton(entity));
+  }
+
+  function matchSelect(id, label, options, value) {
+    const field = element("label", "match-field", label);
+    const select = element("select");
+    select.id = id;
+    options.forEach(item => {
+      const option = element("option", "", item.name);
+      option.value = item.id;
+      option.disabled = Boolean(item.disabled);
+      select.append(option);
+    });
+    select.value = value ?? "";
+    field.append(select);
+    return { field, select };
+  }
+
+  function renderMatchSetup() {
+    const screen = document.getElementById("match-setup-screen");
+    const ui = DATA.match.ui;
+    const setup = normalizeMatchSetup(world, world.ui.matchSetup);
+    if (JSON.stringify(setup) !== JSON.stringify(world.ui.matchSetup)) {
+      world.ui.matchSetup = setup;
+      persistWorld();
+    }
+    screen.replaceChildren();
+    const back = element("a", "button secondary", DATA.text.backToList);
+    back.href = "#/";
+    const fields = element("form", "match-form");
+    const sides = element("div", "match-sides");
+    const players = matchPlayers(world);
+    function change(selection, side) {
+      const focus = document.activeElement.id;
+      world.ui.matchSetup = normalizeMatchSetup(world, selection, side);
+      persistWorld();
+      renderMatchSetup();
+      document.getElementById(focus)?.focus();
+    }
+    ui.sides.forEach(({ id, name }) => {
+      const opponent = setup[id === "a" ? "b" : "a"];
+      const selected = players.find(item => item.id === setup[id].playerId);
+      const panel = element("fieldset", "match-side");
+      panel.append(element("legend", "", name));
+      const choice = matchSelect("match-" + id + "-player", ui.player,
+        players.length ? players.map(item => ({ id: item.id, name: item.name || DATA.text.anonymous })) : [{ id: "", name: ui.choosePlayer }], setup[id].playerId);
+      choice.select.disabled = !players.length;
+      choice.select.addEventListener("change", () => change({ ...setup, [id]: { playerId: choice.select.value, seriesId: null } }, id));
+      const series = matchSelect("match-" + id + "-series", ui.series,
+        selected ? matchSeries(selected).map(seriesId => ({ id: seriesId, name: seriesName(seriesId), disabled: selected.id === opponent.playerId && seriesId === opponent.seriesId })) : [{ id: "", name: ui.chooseSeries }], setup[id].seriesId);
+      series.select.disabled = !selected;
+      series.select.addEventListener("change", () => change({ ...setup, [id]: { ...setup[id], seriesId: series.select.value } }, id));
+      panel.append(choice.field, series.field);
+      if (selected && setup[id].seriesId) {
+        const current = selected.cards[setup[id].seriesId];
+        const summary = element("div", "match-card-summary");
+        summary.style.setProperty("--surface", DATA.basic.surface.find(item => item.id === current.surface).color);
+        summary.append(element("strong", "match-card-name", selected.name || DATA.text.anonymous));
+        if (current.nickname) summary.append(element("span", "match-card-nickname", current.nickname));
+        summary.append(element("span", "match-card-series", seriesName(setup[id].seriesId)));
+        const detail = element("div", "match-card-details");
+        detail.append(cardIcons(current), cardOverall(current));
+        summary.append(detail);
+        panel.append(summary);
+      }
+      sides.append(panel);
+    });
+    const settings = element("div", "match-settings");
+    [["format", ui.formats], ["surface", DATA.basic.surface], ["firstServer", ui.firstServers]].forEach(([key, options]) => {
+      const choice = matchSelect("match-" + key, ui[key], options, setup[key]);
+      choice.select.addEventListener("change", () => {
+        setup[key] = key === "format" ? Number(choice.select.value) : choice.select.value;
+        world.ui.matchSetup = setup;
+        persistWorld();
+      });
+      settings.append(choice.field);
+    });
+    const start = element("button", "button primary match-start", ui.start);
+    start.type = "submit";
+    start.disabled = !resolveMatchEntries(world, setup);
+    fields.append(sides, settings);
+    if (players.length < 2) fields.append(element("p", "match-hint", ui.insufficient));
+    else if (start.disabled) fields.append(element("p", "match-hint", ui.duplicate));
+    fields.append(start);
+    fields.addEventListener("submit", event => {
+      event.preventDefault();
+      runMatch(setup);
+    });
+    screen.append(back, element("h2", "", ui.setup), fields);
+  }
+
+  function runMatch(setup) {
+    const entries = resolveMatchEntries(world, setup);
+    if (!entries) return;
+    // 結果はメモリだけに保持し、保存するのは対戦設定のみ。
+    const options = JSON.parse(JSON.stringify(entries));
+    matchRun = { setup: JSON.parse(JSON.stringify(setup)), options, result: TennisMatch.simulate(options) };
+    world.ui.matchSetup = matchRun.setup;
+    persistWorld();
+    if (location.hash === "#/match/play") renderRoute();
+    else location.hash = "#/match/play";
+  }
+
+  function renderMatchResult() {
+    const screen = document.getElementById("match-result-screen");
+    screen.replaceChildren();
+    const ui = DATA.match.ui;
+    const { options, result } = matchRun;
+    const winner = options[result.winner];
+    const heading = element("header", "match-result-heading");
+    heading.append(element("h2", "", ui.result),
+      element("p", "match-winner", message(ui.winner, { name: winner.player.name || DATA.text.anonymous })),
+      element("p", "match-meta", message(ui.winnerSeries, { side: ui.sides.find(item => item.id === result.winner).name, series: seriesName(winner.seriesId) })));
+    const score = element("p", "match-score");
+    result.scoreText.split(" ").forEach((set, index) => {
+      if (index) score.append(document.createTextNode(" "));
+      score.append(element("span", "", set));
+    });
+    heading.append(score, element("p", "match-meta", [DATA.basic.surface.find(item => item.id === options.surface).name,
+      ui.formats.find(item => item.id === options.format).name].join(DATA.text.separator)));
+    const table = element("table", "match-stats");
+    table.append(element("caption", "", ui.stats));
+    const head = element("thead");
+    const titles = element("tr");
+    titles.append(element("th", "", ui.stats));
+    ui.sides.forEach(({ id, name }) => {
+      const cell = element("th");
+      cell.scope = "col";
+      cell.append(element("span", "match-stat-side", name), element("strong", "", options[id].player.name || DATA.text.anonymous),
+        element("span", "match-stat-series", seriesName(options[id].seriesId)));
+      titles.append(cell);
+    });
+    head.append(titles);
+    const body = element("tbody");
+    ui.statRows.forEach(item => {
+      const row = element("tr");
+      const label = element("th", "", item.name);
+      label.scope = "row";
+      row.append(label);
+      ui.sides.forEach(({ id }) => {
+        const stats = result.stats[id];
+        let value = stats[item.field].toLocaleString("ja-JP");
+        if (item.percent) value = stats[item.total] ? stats[item.field].toLocaleString("ja-JP", { style: "percent", minimumFractionDigits: ui.percentDigits, maximumFractionDigits: ui.percentDigits }) : DATA.text.missingScore;
+        else if (item.total) value = message(ui.fraction, { won: value, total: stats[item.total].toLocaleString("ja-JP") });
+        row.append(element("td", "", value));
+      });
+      body.append(row);
+    });
+    table.append(head, body);
+    const actions = element("div", "match-result-actions");
+    const again = element("button", "button primary", ui.again);
+    again.type = "button";
+    again.addEventListener("click", () => runMatch(matchRun.setup));
+    const change = element("a", "button secondary", ui.changeSetup);
+    change.href = "#/match";
+    actions.append(again, change);
+    screen.append(heading, table, actions);
   }
 
   function renderRoute() {
     const route = resolveEditRoute(world, location.hash);
     const detail = resolvePlayerRoute(world, location.hash);
-    if (!route && !detail && location.hash !== "#/") history.replaceState(null, "", "#/");
-    document.getElementById("list-screen").hidden = Boolean(route || detail);
-    document.getElementById("list-actions").hidden = Boolean(route || detail);
+    if (location.hash === "#/match/play" && !matchRun) history.replaceState(null, "", "#/match");
+    const setup = location.hash === "#/match";
+    const result = location.hash === "#/match/play";
+    if (!route && !detail && !setup && !result && location.hash !== "#/") history.replaceState(null, "", "#/");
+    document.getElementById("list-screen").hidden = Boolean(route || detail || setup || result);
+    document.getElementById("list-actions").hidden = Boolean(route || detail || setup || result);
     document.getElementById("player-screen").hidden = !detail;
+    document.getElementById("match-setup-screen").hidden = !setup;
+    document.getElementById("match-result-screen").hidden = !result;
     document.getElementById("editor-screen").hidden = !route;
     document.getElementById("editor-actions").hidden = !route;
     if (route) {
@@ -736,6 +961,8 @@ function calculateScore(card) {
       editingPlayer = player = undefined;
       editingSeriesId = undefined;
       if (detail) renderPlayer(detail);
+      else if (setup) renderMatchSetup();
+      else if (result) renderMatchResult();
       else renderList();
     }
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -889,7 +1116,12 @@ function calculateScore(card) {
       const option = radioOption("pose", null, pose.id, undefined, "tile pose-tile");
       const preview = element("span", "pose-preview");
       if (pose.file) preview.append(poseGraphic(pose));
-      option.content.append(preview, element("strong", "", pose.name));
+      const caption = element("strong");
+      (pose.labelParts || [pose.name]).forEach((part, index) => {
+        if (index) caption.append(element("wbr"));
+        caption.append(element("span", "pose-word", part));
+      });
+      option.content.append(preview, caption);
       poses.append(option.label);
     });
     illustration.append(poses);

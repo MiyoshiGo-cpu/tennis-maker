@@ -10,7 +10,7 @@ const DATA = {
     periods: { "1": "前半", "2": "後半" },
     label: "{year} {period}", fileLabel: "{year}{period}"
   },
-  worldUi: { listMode: "series", sort: "score", lastExportedAt: null },
+  worldUi: { listMode: "series", sort: "score", lastExportedAt: null, matchSetup: null },
   listSorts: [
     { id: "score", name: "総合力順" }, { id: "name", name: "名前順" }, { id: "created", name: "登録順" }
   ],
@@ -36,6 +36,7 @@ const DATA = {
     basic: "基本情報", stats: "能力値", styleAndServe: "プレイスタイルとサーブ",
     special: "特殊能力", playStyle: "プレイスタイル", serve: "サーブ",
     illustration: "イラスト",
+    playMatch: "対戦する", matchWithPlayer: "この選手で対戦",
     frontStats: "表ステータス", backStats: "裏ステータス",
     anonymous: "名無しの選手", overall: "総合", noSkills: "特殊能力なし",
     saveImage: "画像で保存", viewCard: "カードを見る", reset: "初期値に戻す",
@@ -94,14 +95,14 @@ const DATA = {
   poses: [
     { id: "none", name: "なし" },
     { id: "forehand", name: "フォアハンド", file: "assets/poses/pose-forehand.svg" },
-    { id: "backhand_two", name: "両手バックハンド", file: "assets/poses/pose-backhand-two.svg" },
+    { id: "backhand_two", name: "両手バックハンド", labelParts: ["両手", "バックハンド"], file: "assets/poses/pose-backhand-two.svg" },
     { id: "ready", name: "構え", file: "assets/poses/pose-ready.svg" },
-    { id: "serve_toss", name: "サーブ（トス）", file: "assets/poses/pose-serve-toss.svg" },
+    { id: "serve_toss", name: "サーブ（トス）", labelParts: ["サーブ", "（トス）"], file: "assets/poses/pose-serve-toss.svg" },
     { id: "ball_bounce", name: "ボールつき", file: "assets/poses/pose-ball-bounce.svg" },
     { id: "volley", name: "ボレー", file: "assets/poses/pose-volley.svg" },
     { id: "smash", name: "スマッシュ", file: "assets/poses/pose-smash.svg" },
     { id: "slice", name: "スライス", file: "assets/poses/pose-slice.svg" },
-    { id: "running", name: "ランニングショット", file: "assets/poses/pose-running.svg" },
+    { id: "running", name: "ランニングショット", labelParts: ["ランニング", "ショット"], file: "assets/poses/pose-running.svg" },
     { id: "celebrate", name: "ガッツポーズ", file: "assets/poses/pose-celebrate.svg" }
   ],
   stats: {
@@ -198,6 +199,27 @@ const DATA = {
   ],
   exclusive: [["fast_start", "slow_starter"], ["tenacious", "quitter"]],
   match: {
+    ui: {
+      setup: "対戦設定", result: "試合結果", player: "選手", series: "シリーズ", format: "試合形式",
+      surface: "サーフェス", firstServer: "最初のサーバー", start: "試合開始", choosePlayer: "選手を選択",
+      chooseSeries: "シリーズを選択", insufficient: "対戦するには、カードのある選手が2人以上必要です",
+      duplicate: "別のカードを選んでください", winner: "{name}の勝利", winnerSeries: "{side}：{series}",
+      stats: "試合スタッツ", again: "もう一度（同じ設定）", changeSetup: "設定を変える",
+      sides: [{ id: "a", name: "選手A" }, { id: "b", name: "選手B" }],
+      formats: [{ id: 1, name: "1セットマッチ" }, { id: 3, name: "3セットマッチ" }, { id: 5, name: "5セットマッチ" }],
+      firstServers: [{ id: "random", name: "ランダム" }, { id: "a", name: "選手A" }, { id: "b", name: "選手B" }],
+      percentDigits: 1, fraction: "{won}/{total}",
+      statRows: [
+        { name: "獲得ポイント合計", field: "pointsWon" }, { name: "エース", field: "aces" },
+        { name: "ダブルフォールト", field: "doubleFaults" },
+        { name: "1stサーブの確率", field: "firstServeRate", percent: true, total: "servicePoints" },
+        { name: "1stサーブでのポイント獲得率", field: "firstServeWinRate", percent: true, total: "firstServesIn" },
+        { name: "2ndサーブでのポイント獲得率", field: "secondServeWinRate", percent: true, total: "secondServes" },
+        { name: "ブレークポイント（獲得／機会）", field: "breakPointsWon", total: "breakPointOpportunities" },
+        { name: "ウィナー", field: "winners" }, { name: "ミス", field: "errors" },
+        { name: "ネットでのポイント（獲得／回数）", field: "netPointsWon", total: "netPoints" }
+      ]
+    },
     rules: { formats: [1, 3, 5], initialFormat: 3, initialSurface: "hard", initialServer: "random", gamePoints: 4, setGames: 6, tiebreakPoints: 7, lead: 2, pointLabels: ["0", "15", "30", "40"], advantage: "AD" },
     random: { increment: 0x6D2B79F5, shiftA: 15, shiftB: 7, shiftC: 14, mix: 61, divisor: 4294967296 },
     effective: { min: 1, max: 130, formRange: 3, streakyMultiplier: 2, surface: 3, fatigueCeiling: 99, fatigue: 0.03, pressureCenter: 50, pressure: 0.15, earlyGames: 4 },

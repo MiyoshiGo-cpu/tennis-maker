@@ -20,7 +20,10 @@
           <h2 id="list-series" class="list-series"><select id="series-select"></select></h2>
           <button type="button" id="next-series" class="button secondary" data-text="nextMark"></button>
         </div>
-        <button type="button" class="button primary desktop-add" data-add-player data-text="addPlayer"></button>
+        <div class="list-top-actions">
+          <button type="button" class="button primary desktop-add" data-add-player data-text="addPlayer"></button>
+          <a class="button secondary desktop-match" href="#/match" data-text="playMatch"></a>
+        </div>
       </div>
       <div class="list-controls">
         <fieldset id="list-mode" class="list-mode"></fieldset>
@@ -51,6 +54,8 @@
       </section>
     </section>
     <section id="player-screen" class="detail-screen" hidden></section>
+    <section id="match-setup-screen" class="match-screen" hidden></section>
+    <section id="match-result-screen" class="match-screen" hidden></section>
     <section id="editor-screen" hidden>
       <div class="editor-heading">
         <a id="back-to-player" class="button secondary"></a>
@@ -71,6 +76,7 @@
   </nav>
   <nav id="list-actions" class="mobile-actions list-actions">
     <button type="button" class="button primary" data-add-player data-text="addPlayer"></button>
+    <a class="button secondary" href="#/match" data-text="playMatch"></a>
   </nav>
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <dialog id="image-dialog" aria-labelledby="image-title">
