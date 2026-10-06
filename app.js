@@ -458,7 +458,7 @@ function matchPresentation(options, result) {
   }
   const first = result.sets[0], last = result.sets[result.sets.length - 1];
   const fullSets = format > 1 && result.sets.length === format;
-  const headline = fullSets && last.tiebreak ? "finalTiebreak" : format === 1 && last.tiebreak ? "singleTiebreak" : saved.length ? "savedMatchPoint"
+  const headline = result.retired ? "retirement" : fullSets && last.tiebreak ? "finalTiebreak" : format === 1 && last.tiebreak ? "singleTiebreak" : saved.length ? "savedMatchPoint"
     : first[winner] < first[loser] ? "comeback" : fullSets ? "fullSets"
       : result.sets.every(set => set[loser] <= config.limits.dominantGames) ? "dominant" : format === 1 ? "victory" : "straight";
   const tiebreaks = result.sets.filter(set => set.tiebreak).length;
@@ -485,7 +485,7 @@ function matchPresentation(options, result) {
     if (a === 0 && b === 0) return [];
     return [{ ...item, a, b, share: a / (a + b), better: a === b ? null : (item.lowerBetter ? a < b : a > b) ? "a" : "b" }];
   });
-  return { headline, tags: tags.slice(0, config.limits.tags), moments: moments.slice(0, config.limits.highlights), stats };
+  return { headline, tags: result.retired ? [] : tags.slice(0, config.limits.tags), moments: moments.slice(0, config.limits.highlights), stats };
 }
 
 function matchReplayFrame(result, shown, format) {
@@ -495,7 +495,7 @@ function matchReplayFrame(result, shown, format) {
   const completed = previous ? previous.score.sets.a + previous.score.sets.b : 0;
   const currentGames = !previous || previous.setEnd ? { a: 0, b: 0 } : previous.score.games;
   const columns = Array.from({ length: format }, (_, index) => {
-    if (index < completed) return { ...result.sets[index], tiebreak: result.sets[index].tiebreak ? { ...result.sets[index].tiebreak } : null };
+    if (index < completed || (finished && result.retired && index < result.sets.length)) return { ...result.sets[index], tiebreak: result.sets[index].tiebreak ? { ...result.sets[index].tiebreak } : null };
     if (index === completed && !finished) return { ...currentGames, active: true };
     return { a: DATA.text.missingScore, b: DATA.text.missingScore };
   });
@@ -1026,7 +1026,7 @@ function matchImageFileName(options) {
     const frame = matchReplayFrame(result, playback.shown, options.format);
     const config = DATA.match.playback;
     const phase = document.getElementById("match-replay-phase");
-    phase.textContent = frame.finished ? config.finished : message(frame.tiebreak ? config.tiebreak : config.phase, frame);
+    phase.textContent = frame.finished ? (result.retired ? DATA.tournament.retirementMark : config.finished) : message(frame.tiebreak ? config.tiebreak : config.phase, frame);
     document.querySelectorAll("#match-replay-scoreboard tbody tr").forEach(row => {
       const id = row.dataset.side, other = id === "a" ? "b" : "a";
       const server = row.querySelector(".replay-server");
@@ -1185,7 +1185,9 @@ function matchImageFileName(options) {
     const heading = reveal(element("header", "result-heading"), timing.headline);
     heading.dataset.headline = presentation.headline;
     heading.append(element("p", "result-victory", message(ui.winner, { name: options[result.winner].player.name || DATA.text.anonymous })),
-      element("h2", "result-headline", config.headlines[presentation.headline]));
+      element("h2", "result-headline", result.retired
+        ? message(DATA.tournament.lines.retirementHeadline, { loser: options[result.retired].player.name || DATA.text.anonymous })
+        : config.headlines[presentation.headline]));
     const tags = element("div", "result-tags");
     presentation.tags.forEach(item => tags.append(element("span", "result-tag", message(config.tags[item.type], item))));
     heading.append(tags);
@@ -1214,6 +1216,7 @@ function matchImageFileName(options) {
     const meta = reveal(element("div", "result-tags result-match-meta"), timing.headline + timing.column);
     meta.append(element("span", "result-tag", DATA.basic.surface.find(item => item.id === options.surface).name),
       element("span", "result-tag", ui.formats.find(item => item.id === options.format).name));
+    if (result.retired) meta.append(element("span", "result-tag", DATA.tournament.retirementMark));
     scoreboard.append(meta);
     const sectionsAt = timing.headline + result.sets.length * timing.column + timing.reveal;
     const highlights = reveal(element("section", "result-highlights"), sectionsAt);

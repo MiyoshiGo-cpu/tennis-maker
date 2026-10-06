@@ -64,6 +64,7 @@
       const fatigue = (e.fatigueCeiling - (entry.card.stats?.stamina ?? data.stats.initial)) * e.fatigue * (state.setNumber - 1);
       data.stats.front.forEach(item => { stats[item.id] -= fatigue; });
     }
+    data.stats.front.forEach(item => { stats[item.id] -= entry.carryFatigue ?? 0; });
     if (pressure.length) {
       const bonus = (stats.mental - e.pressureCenter) * e.pressure;
       stats.control += bonus;
@@ -165,6 +166,9 @@
     const firstServer = options.firstServer ?? rules.initialServer;
     if (!rules.formats.includes(format) || !data.basic.surface.some(item => item.id === surface) || !["random", ...keys].includes(firstServer)) throw new Error(config.errors.options);
     if (options.seed !== undefined && !Number.isFinite(options.seed)) throw new Error(config.errors.seed);
+    if ((options.injury !== undefined && typeof options.injury !== "boolean")
+      || keys.some(key => options[key].carryFatigue !== undefined
+        && (!Number.isFinite(options[key].carryFatigue) || options[key].carryFatigue < 0))) throw new Error(data.tournament.errors.options);
     let seed = options.seed;
     if (seed === undefined) {
       const bytes = new Uint32Array(1);
@@ -181,7 +185,7 @@
       const range = config.effective.formRange * (has(entries[key], "streaky") ? config.effective.streakyMultiplier : 1);
       state.form[key] = rng() * range * config.rules.lead - range;
     });
-    const result = { winner: null, sets: [], scoreText: "", points: [], log: [], stats: { a: initialStats(), b: initialStats() }, seed };
+    const result = { winner: null, sets: [], scoreText: "", points: [], log: [], stats: { a: initialStats(), b: initialStats() }, seed, retired: null };
     let tiebreakServer = null;
     let previousTemplate = null, deuces = 0;
     const line = (type, text, pointIndex) => result.log.push({ type, text, pointIndex });
@@ -251,6 +255,21 @@
             line("match", formatText(config.lines.match, { name: names[winner] }), index);
           }
         }
+        // 試合が続くゲームの終了時だけ抽選し、通常対戦の乱数列は変えない。
+        if (options.injury && !result.winner) {
+          const injury = data.tournament.injury;
+          const injured = keys.filter(key => {
+            const rank = entries[key].card.rankSkills?.durability || data.rankSkills.initial;
+            const multiplier = injury.durability[rank] ?? injury.durability[data.rankSkills.initial];
+            return rng() < injury.base * multiplier * (1 + (entries[key].carryFatigue ?? 0) * injury.fatigueScale);
+          });
+          if (injured.length) {
+            result.retired = injured[0];
+            result.winner = other(result.retired);
+            if (!setEnd) result.sets.push({ ...state.games });
+            line("match", formatText(data.tournament.lines.retirement, { name: names[result.retired], winner: names[result.winner] }), index);
+          }
+        }
       }
       result.points.push({ set: state.setNumber, game: state.gameNumber, server, winner, kind: finish.kind, shot, pressure,
         firstServeIn: firstIn, serveNumber: firstIn ? 1 : 2, net: finish.net, tiebreak: wasTiebreak,
@@ -273,9 +292,10 @@
       }
     }
     result.scoreText = result.sets.map(set => `${set.a}-${set.b}${set.tiebreak ? `(${Math.min(set.tiebreak.a, set.tiebreak.b)})` : ""}`).join(" ");
+    if (result.retired) result.scoreText += " " + data.tournament.retirementMark;
     keys.forEach(key => {
       const stats = result.stats[key];
-      stats.firstServeRate = stats.firstServesIn / stats.servicePoints;
+      stats.firstServeRate = stats.servicePoints ? stats.firstServesIn / stats.servicePoints : 0;
       stats.firstServeWinRate = stats.firstServesIn ? stats.firstServePointsWon / stats.firstServesIn : 0;
       stats.secondServeWinRate = stats.secondServes ? stats.secondServePointsWon / stats.secondServes : 0;
     });

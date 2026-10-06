@@ -328,6 +328,18 @@ const DATA = {
     },
     errors: { options: "対戦する2枚のカードと有効な試合設定を指定してください。", seed: "seed は有限の数値で指定してください。" }
   },
+  tournament: {
+    injury: {
+      base: 0.0005, fatigueScale: 0.05,
+      durability: { A: 0.4, B: 0.6, C: 0.8, D: 1.0, E: 1.3, F: 1.7, G: 2.2 }
+    },
+    retirementMark: "RET",
+    lines: {
+      retirement: "{name}がケガのため途中棄権。{winner}の勝利",
+      retirementHeadline: "{loser}の途中棄権により勝利"
+    },
+    errors: { options: "持ち越し疲労は0以上の有限な数値、ケガの設定は真偽値で指定してください。" }
+  },
   score: {
     frontWeight: 0.7, backWeight: 0.3, scale: 40, min: 40,
     ranks: [
