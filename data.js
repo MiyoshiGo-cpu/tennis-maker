@@ -16,6 +16,7 @@ const DATA = {
   ],
   listModes: [{ id: "series", name: "このシリーズ" }, { id: "all", name: "全選手" }],
   importModes: [{ id: "replace", name: "すべて置き換える" }, { id: "append", name: "選手を追加する" }],
+  initialImportMode: "append",
   backup: {
     warningDays: 14, dayMs: 86400000, jsonIndent: 2, mime: "application/json",
     accept: ".json,application/json", fileLabel: "tennis-maker_{year}{month}{day}.json",

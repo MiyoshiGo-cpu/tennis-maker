@@ -156,7 +156,7 @@ legend .common-fields { margin-left: 10px; }
 .series-management h2, .data-management h2 { font-size: 16px; margin: 0 0 14px; }
 .data-management p { font-size: 12px; }
 .backup-warning { padding: 12px; border-radius: 8px; background: var(--badBg); color: var(--badText); }
-.import-mode { margin-top: 20px; }
+.import-mode { margin: 20px 0 14px; }
 .import-mode .choice-content { padding: 6px; }
 .management-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .desktop-add { display: none; }

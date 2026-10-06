@@ -419,9 +419,9 @@ function calculateScore(card) {
   const importField = document.getElementById("import-mode");
   importField.append(element("legend", "", DATA.text.importMode));
   const importOptions = element("div", "segments");
-  DATA.importModes.forEach((item, index) => {
+  DATA.importModes.forEach((item) => {
     const option = radioOption("importMode", "", item.id, item.name, "segment");
-    option.label.querySelector("input").checked = index === 0;
+    option.label.querySelector("input").checked = item.id === DATA.initialImportMode;
     importOptions.append(option.label);
   });
   importField.append(importOptions);
