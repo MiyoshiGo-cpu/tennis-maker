@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><defs>
+  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16306E"/><stop offset="1" stop-color="#0B1530"/></linearGradient>
+  <radialGradient id="ballg" cx="0.38" cy="0.32" r="0.75"><stop offset="0" stop-color="#F2FF8C"/><stop offset="0.6" stop-color="#D7F34A"/><stop offset="1" stop-color="#A9C42A"/></radialGradient>
+  <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient>
+  <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#FFD23F" stop-opacity="0.35"/><stop offset="1" stop-color="#FFD23F" stop-opacity="0"/></radialGradient>
+</defs><rect width="512" height="512" fill="url(#sky)"/>
+<polygon points="40,0 150,0 250,512 -120,512" fill="url(#beam)"/>
+<polygon points="472,0 362,0 262,512 632,512" fill="url(#beam)"/>
+<polygon points="96,300 416,300 512,512 0,512" fill="#3C7D55"/>
+<polygon points="138,318 374,318 470,512 42,512" fill="#2F6FB5"/>
+<g fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round" stroke-opacity="0.95">
+  <polygon points="138,318 374,318 470,512 42,512"/>
+  <line x1="111" y1="380" x2="401" y2="380"/>
+  <line x1="256" y1="380" x2="256" y2="512"/>
+</g>
+<rect x="30" y="292" width="452" height="14" fill="#FFFFFF" fill-opacity="0.18"/>
+<line x1="30" y1="292" x2="482" y2="292" stroke="#FFFFFF" stroke-width="7"/>
+<g stroke="#D7F34A" stroke-width="14" stroke-linecap="round" stroke-opacity="0.75">
+  <line x1="92" y1="168" x2="200" y2="168"/><line x1="122" y1="214" x2="214" y2="214"/><line x1="140" y1="122" x2="218" y2="122"/>
+</g>
+<g transform="translate(318 170) scale(1.12)">
+  <circle r="100" fill="url(#ballg)"/>
+  <path d="M-62 -78 C-18 -40 -18 40 -62 78" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round"/>
+  <path d="M62 -78 C18 -40 18 40 62 78" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round"/>
+  <circle r="100" fill="none" stroke="#8FA31E" stroke-opacity="0.35" stroke-width="4"/>
+</g></svg>
