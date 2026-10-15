@@ -249,6 +249,7 @@ function normalizeTournament(raw, world, usedIds = new Set()) {
     format: DATA.match.rules.formats.includes(raw.format) ? raw.format : settings.format,
     finalFormat: [settings.finalFormat, ...DATA.match.rules.formats].includes(raw.finalFormat) ? raw.finalFormat : settings.finalFormat,
     theme: config.themes.some(item => item.id === raw.theme) ? raw.theme : settings.theme,
+    trophy: config.trophies.some(item => item.id === raw.trophy) ? raw.trophy : settings.trophy,
     seed: Number.isInteger(raw.seed) && raw.seed >= 0 && raw.seed < config.random.divisor ? raw.seed : newTournamentSeed(),
     status, createdAt: Number.isFinite(date) ? new Date(date).toISOString() : new Date().toISOString(),
     entrants: [], snapshot: {}, slots: [], matches: [], fatigue: {}, championId: null };
@@ -424,11 +425,60 @@ function playTournamentRemaining(world, tournament, simulate = TennisMatch.simul
 }
 
 function tournamentChampionPath(tournament) {
-  return tournament.matches.filter(match => tournamentWinner(match) === tournament.championId).map(match => ({
-    round: tournamentRoundName(match.round, tournament.slots.length), bye: match.status === "bye",
-    opponent: tournament.snapshot[match.a === tournament.championId ? match.b : match.a]?.name || DATA.text.anonymous,
-    score: match.result?.scoreText || ""
-  }));
+  return tournament.matches.filter(match => tournamentWinner(match) === tournament.championId).map(match => {
+    const side = match.a === tournament.championId ? "a" : "b", other = side === "a" ? "b" : "a";
+    return { round: tournamentRoundName(match.round, tournament.slots.length), bye: match.status === "bye",
+      final: isTournamentFinal(tournament, match.id), retired: match.result?.retired === other,
+      opponent: tournament.snapshot[match[other]]?.name || DATA.text.anonymous,
+      score: match.result?.sets.map(set => `${set[side]}-${set[other]}${set.tiebreak ? `(${Math.min(set.tiebreak.a, set.tiebreak.b)})` : ""}`).join(" ") || "" };
+  });
+}
+
+function isTournamentFinal(tournament, matchId) {
+  return tournament.matches.at(-1)?.id === matchId;
+}
+
+function matchCommentaryText(item, championship = false) {
+  const suffix = DATA.match.lines.pressure.split("{pressure}")[1], ending = DATA.match.pressure.match + suffix;
+  return championship && item.type === "pressure" && item.text.endsWith(ending)
+    ? item.text.slice(0, -ending.length) + DATA.tournament.celebration.championshipPoint + suffix : item.text;
+}
+
+function matchWinnerBadge(championship = false) {
+  return championship ? DATA.tournament.celebration.title : DATA.match.presentation.winner;
+}
+
+function tournamentChampionStats(tournament) {
+  const stats = { matches: 0, setsLost: 0, aces: 0, breaks: 0, fullSets: 0 }, rules = DATA.match.rules;
+  tournament.matches.filter(match => match.result && tournamentWinner(match) === tournament.championId).forEach(match => {
+    const side = match.a === tournament.championId ? "a" : "b", other = side === "a" ? "b" : "a", result = match.result;
+    const completed = result.sets.filter(set => Math.max(set.a, set.b) >= rules.setGames
+      && (Math.abs(set.a - set.b) >= rules.lead || Math.max(set.a, set.b) === rules.setGames + 1 && Math.min(set.a, set.b) === rules.setGames));
+    stats.matches++;
+    stats.setsLost += completed.filter(set => set[side] < set[other]).length;
+    stats.aces += result.stats[side].aces || 0;
+    stats.breaks += result.stats[side].breakPointsWon || 0;
+    const format = isTournamentFinal(tournament, match.id) && tournament.finalFormat ? tournament.finalFormat : tournament.format;
+    if (format > 1 && !result.retired && completed.length === format) stats.fullSets++;
+  });
+  return stats;
+}
+
+function tournamentChampionBadges(world, tournament) {
+  const config = DATA.tournament.celebration, champion = tournament.championId;
+  if (tournament.status !== "done" || !champion) return [];
+  let streak = 1, previous = shiftSeries(tournament.seriesId, -1);
+  while (compareSeries(previous, DATA.series.startId) >= 0 && world.tournaments.some(item => item.status === "done"
+    && item.name === tournament.name && item.seriesId === previous && item.championId === champion)) {
+    streak++; previous = shiftSeries(previous, -1);
+  }
+  const earlier = world.tournaments.some(item => item.status === "done" && item.championId === champion && item.id !== tournament.id
+    && (compareSeries(item.seriesId, tournament.seriesId) < 0 || item.seriesId === tournament.seriesId
+      && (item.createdAt < tournament.createdAt || item.createdAt === tournament.createdAt && item.id < tournament.id)));
+  const stats = tournamentChampionStats(tournament), seed = tournament.entrants.find(item => item.playerId === champion)?.seedRank;
+  const eligible = { streak: streak >= 2, first: !earlier, perfect: stats.matches > 0 && stats.setsLost === 0,
+    unseeded: !seed, topSeed: seed === 1, fullSets: stats.fullSets >= 2 };
+  return config.badges.filter(item => eligible[item.id]).slice(0, config.badgeLimit).map(item => ({ id: item.id, text: item.text.replace("{n}", streak) }));
 }
 
 function tournamentStanding(tournament, playerId) {
@@ -479,7 +529,7 @@ function repeatWorldTournament(world, tournament) {
   const seriesId = nextTournamentSeries(tournament);
   const playerIds = new Set(tournament.entrants.map(entrant => entrant.playerId));
   const entrants = tournamentCandidates(world, seriesId).filter(player => playerIds.has(player.id)).map(player => ({ playerId: player.id }));
-  const settings = Object.fromEntries(["name", "surface", "format", "finalFormat", "theme"].map(key => [key, tournament[key]]));
+  const settings = Object.fromEntries(["name", "surface", "format", "finalFormat", "theme", "trophy"].map(key => [key, tournament[key]]));
   const next = normalizeTournament({ ...settings, seriesId, status: "draft", entrants }, world, new Set(world.tournaments.map(item => item.id)));
   if (compareSeries(seriesId, world.latestSeriesId) > 0) {
     world.latestSeriesId = seriesId;
@@ -881,6 +931,7 @@ function matchImageFileName(options) {
   let imageUrl;
   let matchRun = null;
   let playbackTimer;
+  let championTimer, trophyGraphicId = 0;
   let tournamentDraft, tournamentFormHash, tournamentView = "round", tournamentRound = 1, tournamentViewId;
   const form = document.getElementById("player-form");
   const card = document.getElementById("player-card");
@@ -1391,7 +1442,7 @@ function matchImageFileName(options) {
   }
 
   function commentaryLine(item) {
-    const line = element("li", "commentary-line commentary-" + item.type, item.text);
+    const line = element("li", "commentary-line commentary-" + item.type, matchCommentaryText(item, matchRun.championship));
     line.dataset.point = item.pointIndex;
     return line;
   }
@@ -1564,7 +1615,7 @@ function matchImageFileName(options) {
       caption.append(element("h2", "result-mini-name", entry.player.name || DATA.text.anonymous), cardOverall(current));
       court.append(identity, caption);
       mini.append(court);
-      if (id === result.winner) mini.append(element("span", "result-winner-badge", config.winner));
+      if (id === result.winner) mini.append(element("span", "result-winner-badge", matchWinnerBadge(matchRun.championship)));
       contender.append(mini);
       contenders.append(contender);
       if (id === "a") contenders.append(element("strong", "result-versus", config.versus));
@@ -1668,11 +1719,12 @@ function matchImageFileName(options) {
 
   document.addEventListener("pointerdown", () => {
     if (!document.getElementById("match-result-screen").hidden) finishResultAnimation();
+    if (!document.getElementById("tournament-champion-screen").hidden) finishChampionAnimation();
   });
   const resultMotion = matchMedia("(prefers-reduced-motion: reduce)");
   resultMotion.addEventListener("change", event => {
     if (event.matches && !document.getElementById("match-result-screen").hidden) finishResultAnimation();
-    if (event.matches) document.querySelector("#tournament-champion-screen .result-confetti")?.replaceChildren();
+    if (event.matches) finishChampionAnimation();
   });
 
   function tournamentLink(text, href) {
@@ -1702,7 +1754,7 @@ function matchImageFileName(options) {
     if (tournamentFormHash !== location.hash) {
       tournamentFormHash = location.hash;
       tournamentDraft = tournament ? { name: tournament.name, seriesId: tournament.seriesId, surface: tournament.surface,
-        format: tournament.format, finalFormat: tournament.finalFormat, theme: tournament.theme, entrantIds: tournament.entrants.map(item => item.playerId), template: "custom" }
+        format: tournament.format, finalFormat: tournament.finalFormat, theme: tournament.theme, trophy: tournament.trophy, entrantIds: tournament.entrants.map(item => item.playerId), template: "custom" }
         : { ...config.initial, name: "", seriesId: world.ui.seriesId, entrantIds: [], template: "custom" };
     }
     const draft = tournamentDraft, fields = element("form", "tournament-form");
@@ -1710,7 +1762,7 @@ function matchImageFileName(options) {
     const template = matchSelect("tournament-template", ui.template, config.templates, draft.template);
     template.select.addEventListener("change", () => {
       const choice = config.templates.find(item => item.id === template.select.value);
-      Object.assign(draft, { template: choice.id, format: choice.format, finalFormat: choice.finalFormat, theme: choice.theme });
+      Object.assign(draft, { template: choice.id, format: choice.format, finalFormat: choice.finalFormat, theme: choice.theme, trophy: choice.trophy });
       renderTournamentForm(tournament);
     });
     fields.append(template.field);
@@ -1749,6 +1801,16 @@ function matchImageFileName(options) {
       tile.append(radio, swatch, element("strong", "", choice.name)); tiles.append(tile);
     });
     themes.append(tiles); fields.append(themes);
+    const trophies = element("fieldset", "tournament-trophies"), trophyTiles = element("div", "trophy-tiles");
+    trophies.append(element("legend", "", ui.trophy));
+    config.trophies.forEach(choice => {
+      const tile = element("label", "theme-tile trophy-tile"), radio = element("input");
+      radio.type = "radio"; radio.name = "tournament-trophy"; radio.value = choice.id; radio.checked = draft.trophy === choice.id;
+      radio.addEventListener("change", () => { draft.trophy = choice.id; });
+      const thumbnail = element("span", "trophy-thumbnail"); thumbnail.append(trophyGraphic(choice));
+      tile.append(radio, thumbnail, element("strong", "", choice.name)); trophyTiles.append(tile);
+    });
+    trophies.append(trophyTiles); fields.append(trophies);
     const entrants = element("fieldset", "tournament-entrants");
     entrants.append(element("legend", "", ui.entrants));
     const candidates = tournamentCandidates(world, draft.seriesId), selection = element("p"), hint = element("p", "entrant-hint", ui.entrantHint);
@@ -1835,7 +1897,7 @@ function matchImageFileName(options) {
 
   function prepareTournamentReplay(tournament, matchId, run, completedFinal = false) {
     const route = "#/tournament/" + tournament.id + "/match/" + matchId;
-    matchRun = { ...run, route, theme: tournament.theme, tournamentId: tournament.id,
+    matchRun = { ...run, route, theme: tournament.theme, tournamentId: tournament.id, championship: isTournamentFinal(tournament, matchId),
       returnHash: "#/tournament/" + tournament.id + (completedFinal ? "/champion" : ""), phase: "replay",
       playback: { shown: 0, logShown: 0, paused: false, speed: DATA.match.playback.initialSpeed } };
   }
@@ -1952,38 +2014,116 @@ function matchImageFileName(options) {
     return panel;
   }
 
+  function trophyGraphic(choice, seriesId) {
+    const source = new DOMParser().parseFromString(DATA.trophySvg[choice.file], "image/svg+xml").documentElement;
+    const svg = document.importNode(source, true), prefix = "trophy-" + (++trophyGraphicId) + "-";
+    // 同じページのサムネイルや書き出し用コピーでも、SVGのグラデーション参照を混線させない。
+    svg.querySelectorAll("[id]").forEach(node => { node.id = prefix + node.id; });
+    svg.querySelectorAll("*").forEach(node => Array.from(node.attributes).forEach(attribute => {
+      if (attribute.value.includes("url(#")) node.setAttribute(attribute.name, attribute.value.replace(/url\(#([^)]+)\)/g, (_, id) => "url(#" + prefix + id + ")"));
+    }));
+    svg.classList.add("trophy-graphic"); svg.dataset.trophy = choice.id;
+    svg.setAttribute("role", "img"); svg.setAttribute("aria-label", choice.name); svg.setAttribute("focusable", "false");
+    if (seriesId) {
+      const plate = choice.plate, config = DATA.tournament.celebration, label = seriesName(seriesId);
+      const units = [...label].reduce((total, letter) => total + (letter.charCodeAt(0) < 128 ? config.plateAsciiWidth : 1), 0);
+      const text = svgElement("text", { x: plate.x + plate.width / 2, y: plate.y + plate.height / 2,
+        "text-anchor": "middle", "dominant-baseline": "central", fill: config.plateColor, "font-family": DATA.fonts.page,
+        "font-size": Math.min(config.plateFontSize, (plate.width - config.platePadding) / units), "font-weight": 700, class: "trophy-plate" });
+      text.textContent = label; svg.append(text);
+    }
+    return svg;
+  }
+
+  function championSpotlights() {
+    const lights = element("div", "champion-spotlights"); lights.setAttribute("aria-hidden", "true");
+    [false, true].forEach(right => {
+      const svg = svgElement("svg", { viewBox: "0 0 360 340", width: 360, height: 340, preserveAspectRatio: "none", class: "champion-beam" + (right ? " beam-right" : "") });
+      const id = "spotlight-" + (++trophyGraphicId), defs = svgElement("defs"), gradient = svgElement("linearGradient", { id, x1: 0, y1: 0, x2: 0, y2: 1 });
+      gradient.append(svgElement("stop", { offset: 0, "stop-color": DATA.colors.white, "stop-opacity": DATA.tournament.celebration.spotlightOpacity }),
+        svgElement("stop", { offset: 1, "stop-color": DATA.colors.white, "stop-opacity": 0 }));
+      defs.append(gradient);
+      svg.append(defs, svgElement("path", { d: "M0 0H70L300 340H170Z", fill: "url(#" + id + ")", ...(right ? { transform: "translate(360 0) scale(-1 1)" } : {}) }));
+      lights.append(svg);
+    });
+    return lights;
+  }
+
+  function createChampionParticles() {
+    const particles = element("div", "champion-particles"), timing = DATA.tournament.celebration.animation, config = DATA.tournament.celebration.particles;
+    particles.setAttribute("aria-hidden", "true");
+    if (resultMotion.matches) return particles;
+    for (let index = 0; index < timing.particles + timing.ribbons; index++) {
+      const ribbon = index >= timing.particles, particle = element("span", ribbon ? "champion-ribbon" : index % config.ballEvery === 0 ? "champion-ball" : "champion-confetti");
+      const right = index % 2 === 1;
+      particle.style.setProperty("--launch-x", right ? "100%" : "0%");
+      particle.style.setProperty("--fly-x", (right ? -1 : 1) * (config.drift + index * config.driftStep % config.driftRange) + "px");
+      particle.style.setProperty("--fly-y", -(config.height + index * config.heightStep % config.heightRange) + "px");
+      particle.style.setProperty("--ribbon-x", (index * config.spread % 100) + "%");
+      particle.style.setProperty("--particle-delay", (timing.confetti + index % config.groups * config.stagger) + "s");
+      particle.style.setProperty("--particle-color", ["var(--result-accent)", DATA.colors.white, DATA.tournament.celebration.gold][index % 3]);
+      particles.append(particle);
+    }
+    particles.addEventListener("animationend", event => { if (event.target !== particles) event.target.remove(); });
+    return particles;
+  }
+
+  function finishChampionAnimation() {
+    clearTimeout(championTimer);
+    document.getElementById("champion-content")?.classList.add("champion-final");
+    document.querySelector(".champion-particles")?.remove();
+  }
+
   function renderTournamentChampion(tournament) {
-    const ui = DATA.tournament.ui, screen = document.getElementById("tournament-champion-screen");
-    const winner = tournament.snapshot[tournament.championId];
-    applyMatchTheme(tournament.theme);
-    screen.replaceChildren(tournamentLink(ui.returnDraw, "#/tournament/" + tournament.id));
+    const ui = DATA.tournament.ui, config = DATA.tournament.celebration, timing = config.animation;
+    const screen = document.getElementById("tournament-champion-screen"), winner = tournament.snapshot[tournament.championId];
+    applyMatchTheme(tournament.theme); screen.replaceChildren();
     const content = element("article", "champion-content"); content.id = "champion-content";
     Object.entries(DATA.match.themes[tournament.theme]).forEach(([key, value]) => content.style.setProperty("--result-" + key, value));
-    const cup = svgElement("svg", { viewBox: "0 0 200 180", width: 180, height: 162, role: "img", "aria-label": ui.cup });
-    cup.classList.add("champion-cup");
-    cup.append(svgElement("path", { d: "M60 20H140V60C140 91 123 111 100 111S60 91 60 60Z M100 111V149 M72 156H128", fill: "none", stroke: "currentColor", "stroke-width": 12, "stroke-linejoin": "round" }),
-      svgElement("path", { d: "M60 32H30V55C30 79 46 91 67 91 M140 32H170V55C170 79 154 91 133 91", fill: "none", stroke: "currentColor", "stroke-width": 9 }));
-    const trophy = element("div", "champion-trophy"); trophy.append(cup);
-    const title = element("h2", "champion-title", message(ui.championTitle, { name: tournament.name || ui.anonymous }));
-    const series = element("p", "champion-series", seriesName(tournament.seriesId));
-    const championCard = element("article", "player-card");
-    renderPlayerCard(championCard, winner, winner.card, tournament.seriesId);
-    const path = element("section", "champion-path"); path.append(element("h3", "", ui.path));
-    const list = element("ul");
-    tournamentChampionPath(tournament).forEach(item => list.append(element("li", "", message(item.bye ? ui.pathBye : ui.pathMatch, item))));
-    path.append(list); content.append(trophy, title, series, championCard, path);
-    const save = element("button", "button primary", DATA.tournament.championExport.label); save.type = "button"; save.id = "save-champion-image";
-    save.addEventListener("click", () => exportChampionImage(tournament));
-    const confetti = createResultConfetti();
-    screen.style.setProperty("--time-confetti", DATA.match.presentation.animation.confetti + "s");
-    screen.append(content, save, confetti);
-    screen.onanimationend = event => {
-      if (event.animationName === "result-confetti" && event.target === confetti.lastElementChild) confetti.replaceChildren();
-    };
+    Object.entries(timing).forEach(([key, value]) => screen.style.setProperty("--champion-" + key, value + "s"));
+    // 書き出し用コピーにも演出の設定値を引き継ぐ。
+    content.style.cssText += screen.style.cssText;
+    content.style.setProperty("--champion-gold", config.gold);
+    const reveal = (node, delay) => { node.classList.add("champion-reveal"); node.style.setProperty("--champion-delay", delay + "s"); return node; };
+    const trophy = element("div", "champion-trophy");
+    trophy.append(trophyGraphic(DATA.tournament.trophies.find(item => item.id === tournament.trophy) || DATA.tournament.trophies[0], tournament.seriesId), element("span", "trophy-shine"));
+    const heading = element("p", "champion-heading", config.title);
+    const identity = reveal(element("header", "champion-identity"), timing.title);
+    identity.append(element("h2", "champion-title", message(ui.championTitle, { name: tournament.name || ui.anonymous })), element("p", "champion-series", seriesName(tournament.seriesId)));
+    const cardWrap = element("div", "champion-card-wrap"), championCard = element("article", "player-card");
+    renderPlayerCard(championCard, winner, winner.card, tournament.seriesId); cardWrap.append(championCard);
+    const badges = element("div", "champion-badges");
+    tournamentChampionBadges(world, tournament).forEach((item, index) => {
+      const badge = element("span", "champion-badge", item.text); badge.dataset.badge = item.id;
+      badge.style.setProperty("--champion-delay", (timing.badges + index * timing.step) + "s"); badges.append(badge);
+    });
+    const stats = reveal(element("section", "champion-stats"), timing.sections), totals = tournamentChampionStats(tournament), numbers = element("dl", "champion-totals");
+    stats.append(element("h3", "", ui.records));
+    config.stats.forEach(item => { const number = element("div"); number.append(element("dt", "", item.name), element("dd", "", totals[item.id].toLocaleString("ja-JP"))); numbers.append(number); });
+    stats.append(numbers);
+    const path = element("section", "champion-path"); path.append(reveal(element("h3", "", config.road), timing.sections));
+    const list = element("ol");
+    tournamentChampionPath(tournament).forEach((item, index) => {
+      const row = reveal(element("li", item.final ? "champion-final-round" : ""), timing.sections + (index + 1) * timing.step);
+      const opponent = element("div", "champion-opponent");
+      if (item.bye) opponent.append(element("strong", "", config.bye));
+      else opponent.append(element("strong", "", item.opponent), element("span", "champion-path-score", item.score), ...(item.retired ? [element("small", "", config.retired)] : []));
+      row.append(element("span", "champion-round", item.round), opponent); list.append(row);
+    });
+    path.append(list);
+    content.append(championSpotlights(), trophy, heading, identity, cardWrap, badges, stats, path);
+    const actions = element("div", "champion-actions"), save = element("button", "button primary", DATA.tournament.championExport.label);
+    save.type = "button"; save.id = "save-champion-image"; save.addEventListener("click", () => exportChampionImage(tournament));
+    actions.append(save, tournamentLink(ui.returnDraw, "#/tournament/" + tournament.id));
+    screen.append(content, actions, createChampionParticles());
+    if (resultMotion.matches) finishChampionAnimation();
+    else championTimer = setTimeout(finishChampionAnimation, timing.cleanup * 1000);
   }
 
   function renderRoute() {
     clearTimeout(playbackTimer);
+    clearTimeout(championTimer);
+    document.querySelector(".champion-particles")?.remove();
     const route = resolveEditRoute(world, location.hash);
     const detail = resolvePlayerRoute(world, location.hash);
     let tournamentRoute = resolveTournamentRoute(world, location.hash);
@@ -2593,6 +2733,7 @@ function matchImageFileName(options) {
   }
 
   function exportChampionImage(tournament) {
+    finishChampionAnimation();
     const config = DATA.tournament.championExport, name = tournament.snapshot[tournament.championId].name || DATA.text.anonymous;
     const filename = message(config.fileLabel, { tournament: imageNamePart(tournament.name || DATA.tournament.ui.anonymous), name: imageNamePart(name), series: seriesName(tournament.seriesId, true) });
     return exportDomImage(document.getElementById("champion-content"), filename, {

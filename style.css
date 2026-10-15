@@ -462,19 +462,71 @@ dialog p { font-size: 12px; }
 .tournament-match-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-top: 1px solid var(--result-main); }
 .tournament-match-actions .button { font-size: 12px; padding: 8px 10px; }
 .round-matches { margin-top: 16px; }
+.trophy-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.trophy-thumbnail { display: block; height: 96px; }
+.trophy-thumbnail .trophy-graphic { display: block; width: 100%; height: 100%; }
 .champion-screen { position: relative; isolation: isolate; }
-.champion-content { max-width: 360px; margin: 20px auto; padding: 18px 12px; color: var(--result-text); background: linear-gradient(var(--result-bg-top), var(--result-bg-bottom)); border-radius: 12px; }
-.champion-trophy { display: flex; justify-content: center; }
-.champion-cup { display: block; width: 180px; height: 162px; color: var(--result-accent); }
-.champion-content .champion-title { margin: 12px 0; text-align: center; color: var(--result-accent); font-size: 24px; }
-.champion-series { text-align: center; color: var(--result-muted); margin: 0 0 20px; }
+.champion-content { position: relative; isolation: isolate; overflow: hidden; max-width: 600px; margin: 20px auto; padding: 24px 12px 28px; color: var(--result-text); background: linear-gradient(var(--result-bg-top), var(--result-bg-bottom)); border: 1px solid var(--result-main); border-radius: 12px; }
+.champion-content > :not(.champion-spotlights) { position: relative; z-index: 1; }
+.champion-content::after { content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none; background: var(--result-bg-top); animation: champion-dawn var(--champion-spotlight) both; }
+.champion-spotlights { position: absolute; inset: 0 0 auto; height: 400px; pointer-events: none; z-index: 0; overflow: hidden; }
+.champion-beam { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: top left; animation: champion-light var(--champion-spotlight) both; }
+.champion-beam.beam-right { transform-origin: top right; animation-name: champion-light-right; }
+.champion-trophy { width: 55%; max-width: 260px; margin: 0 auto; overflow: hidden; animation: champion-trophy var(--champion-trophyDuration) var(--champion-trophy) cubic-bezier(.2,.8,.3,1) both; }
+.champion-trophy::before { content: ""; position: absolute; inset: 25% -25% -5%; background: radial-gradient(ellipse at 50% 90%, var(--result-glow), transparent 65%); z-index: -1; }
+.champion-trophy .trophy-graphic { display: block; width: 100%; height: auto; }
+.trophy-shine { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, transparent 35%, var(--result-text) 50%, transparent 65%); animation: champion-shine var(--champion-trophyDuration) var(--champion-shine) both; }
+.champion-heading { margin: 2px 0 12px; text-align: center; color: var(--result-accent); font: 700 clamp(44px, 12vw, 64px)/1.1 "Barlow Condensed", sans-serif; letter-spacing: .12em; animation: champion-heading var(--champion-reveal) var(--champion-heading) both; }
+.champion-content .champion-title { margin: 0 0 8px; text-align: center; color: var(--result-text); font-size: 24px; }
+.champion-series { text-align: center; color: var(--result-muted); margin: 0 0 24px; }
+.champion-card-wrap { max-width: 360px; margin: 0 auto; perspective: 900px; animation: champion-card var(--champion-reveal) var(--champion-card) both; }
 .champion-content .player-card { color: var(--navy); }
 .champion-content .card-name { margin: 0; font-size: 27px; }
-.champion-path h3 { font-size: 16px; color: var(--result-accent); }
-.champion-path ul { list-style: none; padding: 0; margin: 0; }
-.champion-path li { padding: 10px 0; border-bottom: 1px solid var(--result-main); font-size: 12px; overflow-wrap: anywhere; }
-.champion-screen > .button:last-of-type { display: block; margin: 20px auto; }
-.champion-screen .result-confetti span:nth-child(even) { background: var(--result-accent); }
+.champion-badges { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 24px 0; }
+.champion-badge { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 10px; border: 1px solid var(--result-accent); border-radius: 20px; color: var(--result-accent); font-size: 12px; font-weight: 700; animation: champion-bounce var(--champion-reveal) var(--champion-delay) both; }
+.champion-stats { padding: 16px 10px; background: var(--result-panel); border-radius: 8px; }
+.champion-content h3 { margin: 0 0 14px; color: var(--result-accent); font-size: 16px; }
+.champion-totals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; text-align: center; }
+.champion-totals dt { font-size: 10px; color: var(--result-muted); }
+.champion-totals dd { margin: 4px 0 0; font: 700 34px/1.2 "Barlow Condensed", sans-serif; }
+.champion-path { margin-top: 24px; }
+.champion-path ol { list-style: none; padding: 0; margin: 0 0 0 5px; }
+.champion-path li { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; position: relative; padding: 12px 8px 12px 14px; border-left: 2px solid var(--result-main); font-size: 12px; overflow-wrap: anywhere; }
+.champion-path li::before { content: ""; position: absolute; left: -5px; top: 20px; width: 8px; height: 8px; border-radius: 50%; background: var(--result-main); }
+.champion-round { color: var(--result-muted); }
+.champion-opponent > * { display: block; }
+.champion-path-score { font: 700 22px/1.4 "Barlow Condensed", sans-serif; margin-top: 3px; }
+.champion-opponent small { font-size: 10px; color: var(--result-muted); }
+.champion-path .champion-final-round { color: var(--result-accent); border-color: var(--result-accent); background: var(--result-light); border-radius: 0 8px 8px 0; }
+.champion-final-round .champion-round { color: var(--result-accent); font-weight: 700; }
+.champion-path .champion-final-round::before { background: var(--result-accent); }
+.champion-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; max-width: 600px; margin: 20px auto; }
+.champion-reveal { animation: champion-reveal var(--champion-reveal) var(--champion-delay) both; }
+.champion-particles { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 5; }
+.champion-particles > span { position: absolute; background: var(--particle-color); opacity: 0; animation-duration: var(--champion-particleDuration); animation-delay: var(--particle-delay); animation-fill-mode: both; }
+.champion-confetti, .champion-ball { left: var(--launch-x); bottom: 0; width: 8px; height: 8px; animation-name: champion-confetti; }
+.champion-particles .champion-ball { width: 12px; height: 12px; border-radius: 50%; }
+.champion-ball::after { content: ""; position: absolute; inset: 2px; border-left: 1px solid var(--result-text); border-right: 1px solid var(--result-text); border-radius: 50%; }
+.champion-ribbon { left: var(--ribbon-x); top: -60px; width: 3px; height: 60px; animation-name: champion-ribbon; }
+.champion-final *, .champion-final *::before, .champion-final *::after { animation: none !important; }
+.champion-final :is(.champion-beam, .champion-trophy, .champion-heading, .champion-card-wrap, .champion-badge, .champion-reveal) { opacity: 1; transform: none; }
+.champion-final::after, .champion-final .trophy-shine { display: none; }
+@keyframes champion-dawn { from { opacity: .9; } to { opacity: 0; } }
+@keyframes champion-light { from { opacity: 0; transform: rotate(-35deg); } to { opacity: 1; transform: none; } }
+@keyframes champion-light-right { from { opacity: 0; transform: rotate(35deg); } to { opacity: 1; transform: none; } }
+@keyframes champion-trophy { from { opacity: 0; transform: translateY(50px) scale(.7); } to { opacity: 1; transform: none; } }
+@keyframes champion-shine { 0% { opacity: 0; transform: translateX(-120%); } 40% { opacity: .45; } 100% { opacity: 0; transform: translateX(120%); } }
+@keyframes champion-heading { 0% { opacity: 0; transform: scale(1.5); } 65% { opacity: 1; transform: scale(.97) rotate(-1deg); } 85% { transform: rotate(1deg); } 100% { opacity: 1; transform: none; } }
+@keyframes champion-card { from { opacity: 0; transform: rotateY(-90deg); } to { opacity: 1; transform: none; } }
+@keyframes champion-reveal { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes champion-bounce { 0% { opacity: 0; transform: scale(.6); } 65% { opacity: 1; transform: scale(1.1); } 100% { opacity: 1; transform: none; } }
+@keyframes champion-confetti { 0% { opacity: 0; transform: translate(0, 0) rotate(0); } 8% { opacity: 1; } 50% { opacity: 1; transform: translate(var(--fly-x), var(--fly-y)) rotate(240deg); } 100% { opacity: 0; transform: translate(var(--fly-x), 60px) rotate(480deg); } }
+@keyframes champion-ribbon { 0% { opacity: 0; transform: translateY(0) rotate(-20deg); } 10% { opacity: 1; } 100% { opacity: 0; transform: translateY(110vh) rotate(140deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .champion-content *, .champion-content::after { animation: none !important; }
+  .champion-content :is(.champion-beam, .champion-trophy, .champion-heading, .champion-card-wrap, .champion-badge, .champion-reveal) { opacity: 1; transform: none; }
+  .champion-content::after, .champion-particles, .trophy-shine { display: none; }
+}
 .record-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 18px; }
 .record-totals dt { color: var(--muted); font-size: 11px; }
 .record-totals dd { margin: 4px 0 0; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }

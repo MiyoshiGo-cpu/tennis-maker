@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300" width="240" height="300">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8F5F0E"/><stop offset="0.22" stop-color="#D99B22"/><stop offset="0.42" stop-color="#FFE58A"/>
+      <stop offset="0.58" stop-color="#F4BE3A"/><stop offset="1" stop-color="#9A6612"/>
+    </linearGradient>
+    <linearGradient id="gv" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE9A0"/><stop offset="1" stop-color="#C8891C"/>
+    </linearGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26385F"/><stop offset="1" stop-color="#0E1830"/>
+    </linearGradient>
+  </defs>
+  <!-- 台座 -->
+  <rect x="70" y="236" width="100" height="16" rx="4" fill="url(#base)"/>
+  <rect x="54" y="250" width="132" height="42" rx="6" fill="url(#base)"/>
+  <rect x="82" y="259" width="76" height="22" rx="3" fill="url(#g)"/>
+  <rect x="85" y="262" width="70" height="16" rx="2" fill="none" stroke="#8F5F0E" stroke-opacity="0.6" stroke-width="1"/>
+  <!-- 取っ手 -->
+  <path d="M64 62 C18 60 16 128 74 134" fill="none" stroke="url(#g)" stroke-width="11" stroke-linecap="round"/>
+  <path d="M176 62 C222 60 224 128 166 134" fill="none" stroke="url(#g)" stroke-width="11" stroke-linecap="round"/>
+  <!-- 足と脚 -->
+  <rect x="82" y="218" width="76" height="20" rx="8" fill="url(#g)"/>
+  <path d="M106 168 C106 192 98 206 94 220 L146 220 C142 206 134 192 134 168 Z" fill="url(#g)"/>
+  <ellipse cx="120" cy="192" rx="17" ry="7" fill="url(#gv)"/>
+  <!-- 杯 -->
+  <path d="M60 42 L180 42 C180 122 160 166 120 174 C80 166 60 122 60 42 Z" fill="url(#g)"/>
+  <rect x="52" y="32" width="136" height="14" rx="7" fill="url(#gv)"/>
+  <path d="M66 74 C100 82 140 82 174 74" fill="none" stroke="#8F5F0E" stroke-opacity="0.55" stroke-width="2"/>
+  <!-- テニスボールの紋章 -->
+  <circle cx="120" cy="112" r="20" fill="none" stroke="#8F5F0E" stroke-opacity="0.7" stroke-width="3"/>
+  <path d="M106 98 C116 106 116 118 106 126 M134 98 C124 106 124 118 134 126" fill="none" stroke="#8F5F0E" stroke-opacity="0.7" stroke-width="2.5"/>
+  <!-- ハイライト -->
+  <path d="M76 52 C76 108 88 142 104 160 L96 162 C80 146 70 110 70 52 Z" fill="#FFFFFF" fill-opacity="0.38"/>
+  <rect x="58" y="35" width="60" height="4" rx="2" fill="#FFFFFF" fill-opacity="0.5"/>
+</svg>

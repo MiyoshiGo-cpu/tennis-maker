@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 300" width="240" height="300">
+  <defs>
+    <linearGradient id="w" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A86B36"/><stop offset="0.5" stop-color="#8A5428"/><stop offset="1" stop-color="#5E3517"/>
+    </linearGradient>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9A6612"/><stop offset="0.45" stop-color="#FFE58A"/><stop offset="1" stop-color="#A8741A"/>
+    </linearGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26385F"/><stop offset="1" stop-color="#0E1830"/>
+    </linearGradient>
+  </defs>
+  <!-- 台 -->
+  <rect x="62" y="270" width="116" height="22" rx="5" fill="url(#base)"/>
+  <path d="M104 252 L136 252 L142 272 L98 272 Z" fill="url(#base)"/>
+  <!-- 盾 -->
+  <path d="M52 28 L188 28 L188 150 C188 210 156 244 120 262 C84 244 52 210 52 150 Z" fill="url(#w)"/>
+  <path d="M62 38 L178 38 L178 150 C178 203 150 233 120 250 C90 233 62 203 62 150 Z" fill="none" stroke="url(#g)" stroke-width="4"/>
+  <!-- 月桂樹 -->
+  <g fill="url(#g)">
+    <path d="M86 186 C70 160 70 122 88 96" fill="none" stroke="url(#g)" stroke-width="3"/>
+    <path d="M154 186 C170 160 170 122 152 96" fill="none" stroke="url(#g)" stroke-width="3"/>
+    <ellipse cx="80" cy="170" rx="9" ry="4" transform="rotate(-60 80 170)"/>
+    <ellipse cx="76" cy="148" rx="9" ry="4" transform="rotate(-80 76 148)"/>
+    <ellipse cx="78" cy="126" rx="9" ry="4" transform="rotate(-100 78 126)"/>
+    <ellipse cx="86" cy="106" rx="9" ry="4" transform="rotate(-125 86 106)"/>
+    <ellipse cx="160" cy="170" rx="9" ry="4" transform="rotate(60 160 170)"/>
+    <ellipse cx="164" cy="148" rx="9" ry="4" transform="rotate(80 164 148)"/>
+    <ellipse cx="162" cy="126" rx="9" ry="4" transform="rotate(100 162 126)"/>
+    <ellipse cx="154" cy="106" rx="9" ry="4" transform="rotate(125 154 106)"/>
+  </g>
+  <!-- 交差したラケットとボール -->
+  <g transform="rotate(-35 120 140)">
+    <ellipse cx="120" cy="108" rx="15" ry="20" fill="none" stroke="url(#g)" stroke-width="4"/>
+    <rect x="117" y="127" width="6" height="40" rx="3" fill="url(#g)"/>
+  </g>
+  <g transform="rotate(35 120 140)">
+    <ellipse cx="120" cy="108" rx="15" ry="20" fill="none" stroke="url(#g)" stroke-width="4"/>
+    <rect x="117" y="127" width="6" height="40" rx="3" fill="url(#g)"/>
+  </g>
+  <circle cx="120" cy="178" r="9" fill="#D7F34A"/>
+  <path d="M114 172 q4 6 0 12 M126 172 q-4 6 0 12" fill="none" stroke="#14213D" stroke-opacity="0.45" stroke-width="1.5"/>
+  <!-- 上の赤いリボン -->
+  <path d="M70 56 L170 56 L178 70 L170 84 L70 84 L62 70 Z" fill="#B3202E"/>
+  <path d="M70 56 L170 56 L170 62 L70 62 Z" fill="#FFFFFF" fill-opacity="0.2"/>
+  <!-- 金のプレート -->
+  <rect x="88" y="206" width="64" height="16" rx="3" fill="url(#g)"/>
+</svg>

@@ -441,3 +441,96 @@ test("次シリーズが未作成なら追加し、出場候補0・1人の準備
     run('world=normalizeWorld(JSON.parse(JSON.stringify(world)))');assert.deepEqual(copy(run('world.tournaments[1]')),next);
   }
 });
+
+test("3種類のトロフィーとひな形の初期値を保存し、旧大会は金のカップで補完する",()=>{
+  assert.deepEqual(DATA.tournament.templates.map(t=>[t.id,t.trophy]),[['slam','cup'],['tour','goblet'],['club','shield'],['custom','cup']]);
+  assert.deepEqual(DATA.tournament.trophies.map(t=>[t.id,t.plate]),[
+    ['cup',{x:82,y:259,width:76,height:22}],['goblet',{x:88,y:266,width:64,height:18}],['shield',{x:88,y:206,width:64,height:16}]
+  ]);
+  for(const trophy of ['cup','goblet','shield']) {
+    progressWorld(2,{trophy});assert.equal(run('t.trophy'),trophy);
+    run('playTournamentRemaining(world,t)');
+    run('world=importWorld(createEmptyWorld(),parseWorldImport(prepareWorldExport(world).text),"replace");t=world.tournaments[0]');
+    assert.equal(run('t.trophy'),trophy);assert.equal(run('repeatWorldTournament(world,t).trophy'),trophy);
+    run('delete t.trophy;world=normalizeWorld(world);t=world.tournaments[0]');assert.equal(run('t.trophy'),'cup');
+    run('t.trophy="unknown";world=normalizeWorld(world);t=world.tournaments[0]');assert.equal(run('t.trophy'),'cup');
+  }
+});
+
+test("同梱トロフィーSVGは支給素材と全件一致する",()=>{
+  const root=path.join(__dirname,'..');
+  assert.equal(DATA.tournament.trophies.length,3);
+  for(const trophy of DATA.tournament.trophies) {
+    assert.equal(DATA.trophySvg[trophy.file],fs.readFileSync(path.join(root,trophy.file),'utf8'));
+    assert.match(DATA.trophySvg[trophy.file],/viewBox="0 0 240 300"/);
+  }
+});
+
+function celebrationWorld(seed,series=['2017-1']) {
+  context.raw={version:2,latestSeriesId:series.at(-1),players:drawPlayers(8).map(p=>({...p,cards:Object.fromEntries(series.map(id=>[id,{}]))}))};
+  run('world=normalizeWorld(raw)');context.fixedSeed=seed;
+  for(const seriesId of series) {
+    context.seriesId=seriesId;
+    run('t=createWorldTournament(world,{...DATA.tournament.initial,name:"固定seed杯",format:3,seriesId,seed:fixedSeed,entrantIds:world.players.map(p=>p.id)});playTournamentRemaining(world,t)');
+  }
+}
+
+test("固定seedの大会で初優勝・完全優勝・ノーシード・第1シード・激闘の称号を優先順に出す",()=>{
+  for(const [seed,champion,expected,stats]of [
+    [1,'p_00006',['first','unseeded'],{matches:3,setsLost:1,aces:11,breaks:15,fullSets:1}],
+    [6,'p_00001',['first','topSeed','fullSets'],{matches:3,setsLost:3,aces:22,breaks:12,fullSets:3}],
+    [17,'p_00001',['first','perfect','topSeed'],{matches:3,setsLost:0,aces:10,breaks:13,fullSets:0}]
+  ]) {
+    celebrationWorld(seed);assert.equal(run('t.championId'),champion);
+    assert.deepEqual(copy(run('tournamentChampionBadges(world,t).map(b=>b.id)')),expected);
+    assert.deepEqual(copy(run('tournamentChampionStats(t)')),stats);
+    assert.ok(run('tournamentChampionBadges(world,t).length')<=3);
+    if(seed===17)assert.deepEqual(copy(run('tournamentChampionBadges(world,t).map(b=>b.text)')),['初優勝','完全優勝','第1シードの貫禄']);
+  }
+  celebrationWorld(6);run('t.format=1;t.finalFormat=1');assert.equal(run('tournamentChampionStats(t).fullSets'),0);
+});
+
+test("固定seedの連覇は同名の連続シリーズだけを数え、初優勝は後の優勝で消えない",()=>{
+  celebrationWorld(17,['2017-1','2017-2','2018-1']);
+  assert.deepEqual(copy(run('tournamentChampionBadges(world,t)')),[{id:'streak',text:'3連覇'},{id:'perfect',text:'完全優勝'},{id:'topSeed',text:'第1シードの貫禄'}]);
+  assert.equal(run('tournamentChampionBadges(world,world.tournaments[0])[0].id'),'first');
+  assert.equal(run('tournamentChampionBadges(world,world.tournaments[1])[0].text'),'2連覇');
+  const original=copy(run('world'));context.original=original;
+  for(const change of ['world.tournaments[1].name="別名"','world.tournaments[1].championId="p_00002"','world.tournaments.splice(1,1)','world.tournaments[1].status="live"']) {
+    run('world=JSON.parse(JSON.stringify(original));t=world.tournaments.at(-1);'+change);
+    assert.deepEqual(copy(run('tournamentChampionBadges(world,t).map(b=>b.id)')),['perfect','topSeed']);
+  }
+  run('world=normalizeWorld(original);t=world.tournaments.at(-1)');
+  assert.equal(run('tournamentChampionBadges(world,t)[0].text'),'3連覇');
+  run('t.status="live"');assert.deepEqual(copy(run('tournamentChampionBadges(world,t)')),[]);
+});
+
+test("大会成績と頂点への道はBYEを除き、未完セットを失セットに数えず、優勝者側からのスコアにする",()=>{
+  context.recorded={format:3,finalFormat:5,championId:'p_00001',slots:Array(8).fill(null),snapshot:{p_00002:{name:'相手2'},p_00003:{name:'相手3'}},matches:[
+    {id:'r1-m1',round:1,a:'p_00001',b:null,status:'bye',result:null},
+    {id:'r2-m1',round:2,a:'p_00002',b:'p_00001',status:'done',result:{winner:'b',sets:[{a:4,b:6},{a:6,b:3},{a:2,b:6}],stats:{a:{},b:{aces:4,breakPointsWon:3}},retired:null}},
+    {id:'r3-m1',round:3,a:'p_00003',b:'p_00001',status:'done',result:{winner:'b',sets:[{a:2,b:6},{a:3,b:1}],stats:{a:{},b:{aces:2,breakPointsWon:1}},retired:'a'}}
+  ]};
+  assert.deepEqual(copy(run('tournamentChampionStats(recorded)')),{matches:2,setsLost:1,aces:6,breaks:4,fullSets:1});
+  const rows=copy(run('tournamentChampionPath(recorded)'));
+  assert.equal(rows[0].bye,true);assert.equal(rows[0].final,false);
+  assert.equal(rows[1].score,'6-4 3-6 6-2');assert.equal(rows[1].opponent,'相手2');
+  assert.equal(rows[2].score,'6-2 1-3');assert.equal(rows[2].retired,true);assert.equal(rows[2].final,true);
+});
+
+test("決勝だけの実況とCHAMPION表示を変更しても勝者・スコア・全ポイント・実況原文は変わらない",()=>{
+  celebrationWorld(6);const final=copy(run('t.matches.at(-1)'));context.finalId=final.id;
+  const before=copy(run('replayTournamentMatch(t,finalId)'));context.replay=before;
+  assert.equal(run('isTournamentFinal(t,finalId)'),true);assert.equal(run('isTournamentFinal(t,t.matches[0].id)'),false);
+  const texts=copy(run('replay.result.log.map(item=>matchCommentaryText(item,true))'));
+  assert.ok(texts.some(text=>text.includes('チャンピオンシップポイント')));
+  before.result.log.forEach((line,index)=>{
+    if(line.type==='pressure'&&line.text.endsWith('マッチポイント。'))assert.equal(texts[index],line.text.replace(/マッチポイント。$/,'チャンピオンシップポイント。'));
+    else assert.equal(texts[index],line.text);
+  });
+  assert.deepEqual(copy(run('replay.result.log.map(item=>matchCommentaryText(item))')),before.result.log.map(item=>item.text));
+  assert.deepEqual(copy(run('replayTournamentMatch(t,finalId)')),before);assert.deepEqual(copy(run('replay')),before);
+  assert.equal(run('matchWinnerBadge(true)'),'CHAMPION');assert.equal(run('matchWinnerBadge()'),'WINNER');
+  context.line={type:'pressure',text:'マッチポイント、セットポイント。'};
+  assert.equal(run('matchCommentaryText(line,true)'),context.line.text);
+});
