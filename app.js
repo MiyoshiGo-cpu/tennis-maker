@@ -2107,7 +2107,14 @@ function matchImageFileName(options) {
       const row = reveal(element("li", item.final ? "champion-final-round" : ""), timing.sections + (index + 1) * timing.step);
       const opponent = element("div", "champion-opponent");
       if (item.bye) opponent.append(element("strong", "", config.bye));
-      else opponent.append(element("strong", "", item.opponent), element("span", "champion-path-score", item.score), ...(item.retired ? [element("small", "", config.retired)] : []));
+      else {
+        const score = element("span", "champion-path-score");
+        item.score.split(" ").filter(Boolean).forEach((set, index) => {
+          if (index) score.append(document.createTextNode(" "));
+          score.append(element("span", "champion-set-score", set));
+        });
+        opponent.append(element("strong", "", item.opponent), score, ...(item.retired ? [element("small", "", config.retired)] : []));
+      }
       row.append(element("span", "champion-round", item.round), opponent); list.append(row);
     });
     path.append(list);

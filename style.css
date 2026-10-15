@@ -473,7 +473,7 @@ dialog p { font-size: 12px; }
 .champion-beam { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: top left; animation: champion-light var(--champion-spotlight) both; }
 .champion-beam.beam-right { transform-origin: top right; animation-name: champion-light-right; }
 .champion-trophy { width: 55%; max-width: 260px; margin: 0 auto; overflow: hidden; animation: champion-trophy var(--champion-trophyDuration) var(--champion-trophy) cubic-bezier(.2,.8,.3,1) both; }
-.champion-trophy::before { content: ""; position: absolute; inset: 25% -25% -5%; background: radial-gradient(ellipse at 50% 90%, var(--result-glow), transparent 65%); z-index: -1; }
+.champion-trophy::before { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse 45% 30% at 50% 65%, var(--result-glow), transparent 100%); z-index: -1; }
 .champion-trophy .trophy-graphic { display: block; width: 100%; height: auto; }
 .trophy-shine { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, transparent 35%, var(--result-text) 50%, transparent 65%); animation: champion-shine var(--champion-trophyDuration) var(--champion-shine) both; }
 .champion-heading { margin: 2px 0 12px; text-align: center; color: var(--result-accent); font: 700 clamp(44px, 12vw, 64px)/1.1 "Barlow Condensed", sans-serif; letter-spacing: .12em; animation: champion-heading var(--champion-reveal) var(--champion-heading) both; }
@@ -496,6 +496,7 @@ dialog p { font-size: 12px; }
 .champion-round { color: var(--result-muted); }
 .champion-opponent > * { display: block; }
 .champion-path-score { font: 700 22px/1.4 "Barlow Condensed", sans-serif; margin-top: 3px; }
+.champion-set-score { display: inline-block; white-space: nowrap; overflow-wrap: normal; }
 .champion-opponent small { font-size: 10px; color: var(--result-muted); }
 .champion-path .champion-final-round { color: var(--result-accent); border-color: var(--result-accent); background: var(--result-light); border-radius: 0 8px 8px 0; }
 .champion-final-round .champion-round { color: var(--result-accent); font-weight: 700; }
